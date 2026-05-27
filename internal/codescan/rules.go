@@ -168,6 +168,19 @@ func AllRules() []Rule {
 				regexp.MustCompile("(?i)`[^`]*\\b(android|google\\s*play|play\\s*store|samsung|windows\\s*phone)\\b[^`]*`"),
 				regexp.MustCompile(`(?i)\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b`), // bare text (JSX content)
 			},
+			ignorePatterns: []*regexp.Regexp{
+				// React Native / Expo platform-branching idioms — these are
+				// internal platform checks, not user-visible references to a
+				// competing platform. Skipping them is the same rationale that
+				// merged in PR #1 for HTTP-namespace XML URIs.
+				regexp.MustCompile(`Platform\.OS\s*[!=]==?\s*['"]android['"]`), // Platform.OS === 'android' / !==
+				regexp.MustCompile(`Platform\.select\s*\(`),                    // Platform.select({ android: ..., ios: ... })
+				regexp.MustCompile(`os:\s*Platform\.OS`),                       // device-context tag assignment
+				regexp.MustCompile(`^\s*android\s*:\s*[\{\[]`),                  // Expo config object key: `android: {` / `android: [`
+				regexp.MustCompile(`['"]android['"]\s*:`),                       // object literal key in quotes: 'android':
+				regexp.MustCompile(`['"]\.android\.['"]`),                       // platform-extension file references
+				regexp.MustCompile(`\.android\b`),                               // property access: config.android, expo.android, os.android
+			},
 		},
 		&PatternRule{
 			id:        "placeholder-content",
@@ -185,6 +198,17 @@ func AllRules() []Rule {
 			},
 			ignorePatterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(func\s+placeholder\s*\(|\.placeholder\s*[:=]|placeholder\s*[:=]\s*[A-Z]|placeholder\s*\(in\s*context)`), // Swift/WidgetKit protocol methods and property assignments
+				// React Native / generic JSX prop usage: `placeholder="..."`,
+				// `placeholder={...}`, or object literal `placeholder: ...` /
+				// `placeholder: "..."`. Any of these forms is an intentional
+				// value binding for an input hint, never lorem-ipsum content.
+				// The original Swift-targeted ignore above only covers
+				// `placeholder = SomeUppercase` and breaks on JSX `{` braces
+				// or lowercase first identifiers. This broader form catches
+				// every JSX/JS placeholder-prop call site, leaving only true
+				// content matches (`<Text>This is a placeholder.</Text>`,
+				// string values literally containing "placeholder", etc.).
+				regexp.MustCompile(`placeholder\s*[:=]`),
 			},
 		},
 		&PatternRule{
@@ -318,6 +342,11 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 		// Skip comment lines
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
+			continue
+		}
+		// JSX comment syntax: `{/* ... */}` — the canonical way to write a
+		// comment inside JSX/TSX markup. Treat the same as a `/* */` block.
+		if strings.HasPrefix(trimmed, "{/*") {
 			continue
 		}
 
