@@ -98,20 +98,29 @@ var trackingSDKPatterns = []struct {
 	Pattern *regexp.Regexp
 	Name    string
 }{
-	{regexp.MustCompile(`(?i)firebase.*analytics`), "Firebase Analytics"},
-	{regexp.MustCompile(`(?i)google.*analytics`), "Google Analytics"},
-	{regexp.MustCompile(`(?i)(fbsdk|facebook.*sdk)`), "Facebook SDK"},
-	{regexp.MustCompile(`(?i)adjust.*sdk`), "Adjust SDK"},
+	{regexp.MustCompile(`(?i)\bfirebase[\s._-]?analytics\b`), "Firebase Analytics"},
+	{regexp.MustCompile(`(?i)\bgoogle[\s._-]?analytics\b`), "Google Analytics"},
+	{regexp.MustCompile(`(?i)(fbsdk|\bfacebook[\s._-]?sdk\b)`), "Facebook SDK"},
+	{regexp.MustCompile(`(?i)\badjust[\s._-]?sdk\b`), "Adjust SDK"},
 	{regexp.MustCompile(`(?i)appsflyer`), "AppsFlyer"},
 	{regexp.MustCompile(`(?i)(import\s+Amplitude|AmplitudeSwift|amplitude\.init|Amplitude\.instance|amplitude-js|@amplitude/)`), "Amplitude"},
 	{regexp.MustCompile(`(?i)(mixpanel)`), "Mixpanel"},
 	{regexp.MustCompile(`(?i)(@segment/|analytics-react-native)`), "Segment"},
 	{regexp.MustCompile(`(?i)(branch\.io|react-native-branch)`), "Branch"},
-	{regexp.MustCompile(`(?i)(google.*ads|GADMobileAds|admob)`), "Google Ads/AdMob"},
-	{regexp.MustCompile(`(?i)(unity.*ads|UnityAds)`), "Unity Ads"},
+	{regexp.MustCompile(`(?i)(\bgoogle[\s._-]?ads\b|GADMobileAds|admob)`), "Google Ads/AdMob"},
+	{regexp.MustCompile(`(?i)(\bunity[\s._-]?ads\b|UnityAds)`), "Unity Ads"},
 	{regexp.MustCompile(`(?i)(applovin|AppLovinSDK)`), "AppLovin"},
 	{regexp.MustCompile(`(?i)(ironSource|IronSource)`), "ironSource"},
 }
+
+// nsPrivacyTrackingTrueRe matches the NSPrivacyTracking key bound to a
+// <true/> value, tolerating whitespace and an optional inline comment
+// between the key and value tags. This prevents the "tracking declared
+// but no SDK" finding from firing when NSPrivacyTracking is <false/> but
+// the same manifest legitimately has NSPrivacyCollectedDataTypeLinked
+// <true/> entries (the standard pattern when declaring user-linked data
+// collection per ASC's "App Privacy" section).
+var nsPrivacyTrackingTrueRe = regexp.MustCompile(`<key>\s*NSPrivacyTracking\s*</key>\s*<true/>`)
 
 // Scan runs the privacy analysis on a project directory.
 func Scan(projectPath string) (*ScanResult, error) {
@@ -254,8 +263,14 @@ func Scan(projectPath string) (*ScanResult, error) {
 		})
 	}
 
-	// 5. Check if privacy manifest declares tracking but no tracking SDKs found
-	if result.HasPrivacyInfo && strings.Contains(privacyContent, "NSPrivacyTracking") && strings.Contains(privacyContent, "<true/>") && len(trackingSDKsFound) == 0 {
+	// 5. Check if privacy manifest declares tracking but no tracking SDKs found.
+	// The check binds NSPrivacyTracking directly to its <true/> value via regex
+	// rather than doing two independent strings.Contains() lookups — otherwise
+	// any manifest that legitimately has NSPrivacyTracking <false/> alongside
+	// NSPrivacyCollectedDataTypeLinked <true/> entries (the standard pattern
+	// when declaring data collection per ASC's "App Privacy" section) would
+	// incorrectly trip this finding.
+	if result.HasPrivacyInfo && nsPrivacyTrackingTrueRe.MatchString(privacyContent) && len(trackingSDKsFound) == 0 {
 		result.Findings = append(result.Findings, Finding{
 			Severity: "INFO",
 			Title:    "Privacy manifest declares tracking but no tracking SDKs detected",
