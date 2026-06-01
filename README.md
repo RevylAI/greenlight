@@ -2,7 +2,7 @@
 
 **Know before you submit.** Pre-submission compliance scanner for the Apple App Store.
 
-Greenlight scans your app — source code, privacy manifests, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines, catching rejection risks before Apple does.
+Greenlight scans your app — source code, privacy manifests, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines, catching rejection risks before Apple does. And with `greenlight verify`, it goes a step further: it validates your flow-dependent guidelines (account deletion, restore purchases, Sign in with Apple) on a **real device** via [Revyl](https://revyl.com) — catching broken flows that static analysis structurally can't.
 
 ## Install
 
@@ -118,6 +118,41 @@ API-based checks against your app in App Store Connect:
 - Age rating and encryption compliance
 - Content analysis (platform references, placeholders)
 
+### `greenlight verify [path]` — Runtime flow validation (via Revyl)
+
+Static checks confirm a flow **exists** in your source. `verify` confirms it **works**
+on a real device by handing flow-dependent guidelines to the [Revyl](https://revyl.com)
+CLI and running the actual flow.
+
+This catches what static analysis structurally cannot. A "Delete Account" button wired
+to nothing **passes** codescan — the string `deleteAccount` is present, so §5.1.1 is
+suppressed and you get GREENLIT — but it dead-ends at runtime, and Apple rejects it under
+§5.1.1(v). `verify` runs the flow on a device and catches it.
+
+```bash
+greenlight verify .                       # dry-run-style: shows which flows are claimed
+greenlight verify . --dry-run             # print the generated Revyl tests, no device
+greenlight verify . --build-name "My App" \
+  --var email=qa@acme.com --var password=secret   # run on a device
+greenlight verify . --build-name "My App" --flows account-deletion --os-version "iOS 26.2"
+```
+
+Flows verified (only the ones your app actually claims are run):
+
+| Flow | Guideline | What runtime proves that static can't |
+|------|-----------|----------------------------------------|
+| `account-deletion`   | §5.1.1 | The account is *actually deleted* — not that a `deleteAccount` string exists |
+| `restore-purchases`  | §3.1.1 | "Restore Purchases" does something — not a silent no-op button |
+| `sign-in-apple`      | §4.8   | The Apple sign-in sheet actually appears — not a dead control |
+
+A failed flow becomes a `BLOCK` static analysis could never produce, with a shareable
+Revyl report link as evidence.
+
+> **Note:** Unlike every other greenlight command, `verify` is **not** offline. It needs
+> the [`revyl` CLI](https://docs.revyl.com), a Revyl account (`revyl auth login`), and a
+> registered build. It's a deliberately separate, opt-in tier — run `preflight` first to
+> get GREENLIT, then `verify` before you submit.
+
 ### `greenlight guidelines` — Browse Apple's guidelines
 
 ```bash
@@ -191,6 +226,11 @@ greenlight
 ├── codescan          Code-only scanning
 ├── privacy           Privacy-only scanning
 ├── ipa               Binary-only inspection
+│
+├── verify            Runtime flow validation on a real device (via Revyl)
+│   ├── account-deletion   §5.1.1 — the account is actually deleted
+│   ├── restore-purchases  §3.1.1 — Restore Purchases isn't a no-op
+│   └── sign-in-apple      §4.8   — the Apple sign-in sheet actually appears
 │
 ├── scan              App Store Connect API checks (tiers 1-4)
 │   ├── Tier 1        Metadata & completeness

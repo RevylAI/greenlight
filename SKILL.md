@@ -78,6 +78,39 @@ greenlight preflight .
 
 The goal is always: **zero CRITICAL findings = GREENLIT status.**
 
+## Step 4 (optional): Validate flow-dependent guidelines at runtime
+
+GREENLIT means the *static* checks pass — but some guidelines can only be confirmed by
+running the flow. Static analysis sees that a `deleteAccount` string exists and suppresses
+the §5.1.1 warning; it cannot see that the button is wired to nothing. Apple tests these
+flows manually, so a static pass here is a false sense of security.
+
+If the project claims a flow-dependent feature (account creation, in-app purchases, or
+social login), validate it on a real device with `greenlight verify`:
+
+```bash
+# See which flows the app claims and the exact tests that would run — no device needed:
+greenlight verify . --dry-run
+
+# Run them on a real device (needs the revyl CLI + `revyl auth login` + a registered build):
+greenlight verify . --build-name "<your Revyl build>" \
+  --var email=<test account> --var password=<test password>
+```
+
+`verify` runs each claimed flow on-device via Revyl and reports:
+- **VERIFIED** — the flow works.
+- **FAILED** — the flow passed static analysis but broke at runtime (e.g. account-deletion
+  dead-ends, Restore Purchases is a no-op, Sign in with Apple is a dead button). Fix the
+  wiring — not just the presence of the string — and re-run.
+- **SETUP** — could not run (not authenticated, no build, no device). Resolve and retry.
+
+Treat a FAILED flow exactly like a CRITICAL: it will get the app rejected. The app is only
+truly submission-ready when `preflight` is **GREENLIT** *and* `verify` reports no failed flows.
+
+> `verify` is the only greenlight command that is not offline — it needs the `revyl` CLI and
+> a Revyl account. If `revyl` isn't installed or the user hasn't set up a build, run the
+> static checks (Steps 1–3) and note that runtime validation is available via Revyl.
+
 ## Other CLI Commands
 
 ```bash
@@ -85,6 +118,7 @@ greenlight codescan .                      # Code-only scan
 greenlight privacy .                       # Privacy manifest scan
 greenlight ipa /path/to/build.ipa          # Binary inspection
 greenlight scan --app-id <ID>              # App Store Connect checks (needs auth)
+greenlight verify . --dry-run              # Runtime flow validation via Revyl (needs revyl CLI)
 greenlight guidelines search "privacy"     # Search Apple guidelines
 ```
 
