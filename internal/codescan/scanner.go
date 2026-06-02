@@ -103,8 +103,9 @@ func (s *Scanner) Scan() ([]Finding, error) {
 	return findings, nil
 }
 
-// dedupOnceRules keeps a single finding (by title) for each firstMatchOnly rule,
-// preserving order and leaving every other rule's findings untouched.
+// dedupOnceRules keeps a single finding (by title) for each firstMatchOnly rule.
+// It stably sorts all findings by file/line/title first so the surviving finding
+// is deterministic; other rules' findings are otherwise kept.
 func dedupOnceRules(rules []Rule, findings []Finding) []Finding {
 	once := make(map[string]bool)
 	for _, r := range rules {

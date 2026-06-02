@@ -111,9 +111,20 @@ func Run(cfg Config) (*Result, error) {
 	selected := selectedSet(cfg.Flows)
 	client := revyl.NewClient(cfg.RevylBin)
 
+	// Only engage the Revyl runtime tier if at least one selected flow is
+	// actually claimed. Otherwise there is nothing to verify, and we must not
+	// prompt for sign-up/auth or show a CTA with 0 flows.
+	anyClaimed := false
+	for _, f := range AllFlows() {
+		if (len(selected) == 0 || selected[f.ID]) && f.Claimed(claims) {
+			anyClaimed = true
+			break
+		}
+	}
+
 	// Determine Revyl readiness once. If the user has no usable account, we
-	// don't error per-flow — we surface a single sign-up call-to-action.
-	if !cfg.DryRun {
+	// don't error per-flow: we surface a single sign-up call-to-action.
+	if !cfg.DryRun && anyClaimed {
 		if err := client.Available(); err != nil {
 			res.Onboarding = &Onboarding{Reason: OnboardCLIMissing, Message: err.Error()}
 		} else if !client.Authenticated() {
@@ -124,7 +135,7 @@ func Run(cfg Config) (*Result, error) {
 	// Resolve the build name to an app id once: `test create --app` needs it.
 	var appID string
 	var appIDErr error
-	if res.Onboarding == nil && !cfg.DryRun && cfg.BuildName != "" {
+	if res.Onboarding == nil && !cfg.DryRun && anyClaimed && cfg.BuildName != "" {
 		appID, appIDErr = client.AppID(cfg.BuildName)
 	}
 
@@ -247,9 +258,11 @@ func Run(cfg Config) (*Result, error) {
 			fr.Detail = "the flow could not run to completion on the cloud device: no steps executed (the app may have failed to launch, or the run aborted before the first step finished). See the report."
 		default:
 			// Report finalized as a failure with steps executed: a real flow break.
+			// Redact secret --var values (passwords/tokens) that were inlined into
+			// step text, so they don't leak into the terminal or JSON.
 			fr.Status = StatusFailed
-			fr.FailedStep = firstNonEmptyStr(report.FailedStep, run.FailedStep)
-			fr.FailedReason = report.FailedReason
+			fr.FailedStep = redactVars(firstNonEmptyStr(report.FailedStep, run.FailedStep), cfg.Vars)
+			fr.FailedReason = redactVars(report.FailedReason, cfg.Vars)
 			fr.ReportURL = reportURL
 			fr.Detail = staticPassedMessage(f, claims, fr.FailedStep)
 		}
@@ -283,6 +296,28 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// redactVars replaces the values of sensitive --var entries (passwords, tokens,
+// secrets) wherever they appear in a reported string, so inlined credentials
+// don't leak into the terminal or JSON output.
+func redactVars(s string, vars map[string]string) string {
+	for k, v := range vars {
+		if v != "" && isSensitiveKey(k) {
+			s = strings.ReplaceAll(s, v, "[redacted]")
+		}
+	}
+	return s
+}
+
+func isSensitiveKey(k string) bool {
+	k = strings.ToLower(k)
+	for _, marker := range []string{"pass", "secret", "token", "key", "cred", "auth", "pin", "otp"} {
+		if strings.Contains(k, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 // testName builds a per-build Revyl test name so the same flow run against two
