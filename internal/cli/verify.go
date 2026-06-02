@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/RevylAI/greenlight/internal/revyl"
 	"github.com/RevylAI/greenlight/internal/verify"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -177,6 +178,11 @@ func writeVerifyTerminal(w *os.File, r *verify.Result) {
 			bold.Fprintf(w, "§%s %s\n", f.Guideline, f.Title)
 			fmt.Fprintf(w, "             could not run: %s\n", f.Detail)
 			fmt.Fprintln(w)
+		case verify.StatusPending:
+			yellow.Fprint(w, "  [pending]  ")
+			bold.Fprintf(w, "§%s %s\n", f.Guideline, f.Title)
+			dim.Fprintln(w, "             claimed in your code — validate it on a real device with Revyl")
+			fmt.Fprintln(w)
 		case verify.StatusSkipped:
 			dim.Fprintf(w, "  [skipped]  §%s %s — %s\n", f.Guideline, f.Title, f.Detail)
 		}
@@ -196,7 +202,61 @@ func writeVerifyTerminal(w *os.File, r *verify.Result) {
 		}
 	}
 
+	if r.Onboarding != nil {
+		printSignupCTA(w, r)
+		return
+	}
 	printVerifyFooter(w, r)
+}
+
+// printSignupCTA is the greenlight -> Revyl activation funnel: when a user
+// reaches the runtime tier without a Revyl account, show them exactly what
+// they'd unlock and how to sign up — instead of a raw auth error.
+func printSignupCTA(w *os.File, r *verify.Result) {
+	bold := color.New(color.Bold)
+	greenC := color.New(color.FgGreen)
+
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprintln(w)
+
+	n := r.Summary.Pending
+	bold.Fprintf(w, "  %d flow(s) Apple will test that static analysis can't confirm.\n", n)
+	fmt.Fprint(w, "  Validate them on real devices with ")
+	purple.Fprint(w, "Revyl")
+	fmt.Fprintln(w, " — free to start.")
+	fmt.Fprintln(w)
+
+	switch r.Onboarding.Reason {
+	case verify.OnboardNotAuthenticated:
+		fmt.Fprintln(w, "  You have the Revyl CLI — you're one step away:")
+		fmt.Fprintln(w)
+		fmt.Fprint(w, "    Sign up free   ")
+		color.New(color.Underline).Fprintln(w, revyl.SignupURL)
+		fmt.Fprint(w, "    Then run       ")
+		greenC.Fprintln(w, revyl.LoginCmd)
+		dim.Fprintln(w, "    (already have an account? just run that)")
+	default: // OnboardCLIMissing
+		fmt.Fprintln(w, "  Three steps to your first runtime check:")
+		fmt.Fprintln(w)
+		fmt.Fprint(w, "    1. Sign up free    ")
+		color.New(color.Underline).Fprintln(w, revyl.SignupURL)
+		fmt.Fprint(w, "    2. Install the CLI ")
+		greenC.Fprintln(w, revyl.InstallCmd)
+		fmt.Fprint(w, "    3. Authenticate    ")
+		greenC.Fprintln(w, revyl.LoginCmd)
+	}
+
+	fmt.Fprintln(w)
+	fmt.Fprint(w, "  Then re-run:  ")
+	greenC.Fprintln(w, "greenlight verify . --build-name \"<your Revyl build>\"")
+
+	fmt.Fprintln(w)
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprint(w, "  Powered by ")
+	purple.Fprint(w, "Revyl")
+	fmt.Fprintln(w, " — the mobile reliability platform")
+	dim.Fprintln(w, "  Static catches rejections. Revyl catches broken flows.")
+	fmt.Fprintln(w)
 }
 
 func printVerifyFooter(w *os.File, r *verify.Result) {

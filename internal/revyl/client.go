@@ -15,6 +15,14 @@ import (
 	"time"
 )
 
+// Onboarding constants for the Revyl activation funnel — surfaced when a
+// greenlight user reaches the runtime tier without a Revyl account.
+const (
+	SignupURL  = "https://app.revyl.ai/signup"
+	InstallCmd = "curl -fsSL https://revyl.com/install.sh | sh"
+	LoginCmd   = "revyl auth login"
+)
+
 // Client invokes the revyl CLI.
 type Client struct {
 	Bin string
@@ -47,6 +55,21 @@ func (c *Client) Available() error {
 		return nil
 	}
 	return fmt.Errorf("revyl CLI not found (looked for %q) — install it (https://docs.revyl.com) or pass --revyl <path>", c.Bin)
+}
+
+// Authenticated reports whether the user has a usable Revyl session. Used to
+// distinguish "needs to sign up / log in" from "the flow failed".
+func (c *Client) Authenticated() bool {
+	out, err := c.run("auth", "status")
+	l := strings.ToLower(out)
+	if strings.Contains(l, "not authenticated") || strings.Contains(l, "not logged in") ||
+		strings.Contains(l, "no credentials") || strings.Contains(l, "please log in") {
+		return false
+	}
+	if err != nil {
+		return false
+	}
+	return strings.Contains(l, "authenticated") || strings.Contains(l, "logged in")
 }
 
 // EnsureTest creates or updates a Revyl test from a YAML file. Idempotent via
