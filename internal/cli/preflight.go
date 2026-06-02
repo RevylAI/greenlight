@@ -8,8 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
+	"github.com/RevylAI/greenlight/internal/codescan"
 	"github.com/RevylAI/greenlight/internal/preflight"
+	"github.com/RevylAI/greenlight/internal/verify"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +19,14 @@ var (
 	preflightIPA    string
 	preflightFormat string
 	preflightOutput string
+
+	// Runtime tier (--verify): after the static checks, hand flow-dependent
+	// guidelines to Revyl to validate on a real device.
+	preflightVerify      bool
+	preflightBuildName   string
+	preflightVars        map[string]string
+	preflightDeviceModel string
+	preflightOSVersion   string
 )
 
 var preflightCmd = &cobra.Command{
@@ -31,10 +41,15 @@ Combines:
   • Metadata scan — app.json / Info.plist completeness, icons, version, bundle ID
   • IPA inspect   — binary analysis (if --ipa is provided)
 
+Add --verify to continue past the static checks and validate your flow-dependent
+guidelines (account deletion, restore purchases, Sign in with Apple) on a REAL
+device via Revyl — catching broken flows static analysis structurally can't.
+
 Usage:
   greenlight preflight .
   greenlight preflight ./my-app --ipa build.ipa
-  greenlight preflight /path/to/project --format json`,
+  greenlight preflight /path/to/project --format json
+  greenlight preflight . --verify --build-name "My App" --var email=qa@acme.com --var password=secret`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPreflight,
 }
@@ -43,6 +58,11 @@ func init() {
 	preflightCmd.Flags().StringVar(&preflightIPA, "ipa", "", "path to .ipa file for binary inspection")
 	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json")
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
+	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a real device via Revyl")
+	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
+	preflightCmd.Flags().StringToStringVar(&preflightVars, "var", nil, "test variable for --verify, e.g. --var email=qa@acme.com (repeatable)")
+	preflightCmd.Flags().StringVar(&preflightDeviceModel, "device-model", "", "device model for --verify, e.g. \"iPhone 16\"")
+	preflightCmd.Flags().StringVar(&preflightOSVersion, "os-version", "", "OS version for --verify, e.g. \"iOS 26.2\"")
 	rootCmd.AddCommand(preflightCmd)
 }
 
@@ -101,12 +121,77 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		output = os.Stdout
 	}
 
-	switch strings.ToLower(preflightFormat) {
-	case "json":
-		return writePreflightJSON(output, result)
-	default:
-		return writePreflightTerminal(output, result)
+	isJSON := strings.ToLower(preflightFormat) == "json"
+
+	// Default path: static only (offline, zero-account, instant).
+	if !preflightVerify {
+		if isJSON {
+			return writePreflightJSON(output, result)
+		}
+		if err := writePreflightTerminal(output, result); err != nil {
+			return err
+		}
+		printRuntimeNudge(output, path)
+		return nil
 	}
+
+	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
+	vstart := time.Now()
+	vres, verr := verify.Run(verify.Config{
+		ProjectPath: path,
+		BuildName:   preflightBuildName,
+		Platform:    "ios",
+		Vars:        preflightVars,
+		DeviceModel: preflightDeviceModel,
+		OSVersion:   preflightOSVersion,
+	})
+	if verr != nil {
+		return fmt.Errorf("runtime validation failed: %w", verr)
+	}
+	vres.Elapsed = time.Since(vstart)
+
+	if isJSON {
+		return writeCombinedJSON(output, result, vres)
+	}
+
+	if err := writePreflightTerminal(output, result); err != nil {
+		return err
+	}
+	fmt.Fprintln(output)
+	purple.Fprintln(output, "  → Static checks done. Now validating the flows actually WORK, on a real device…")
+	fmt.Fprintln(output)
+	writeVerifyTerminal(output, vres)
+	return nil
+}
+
+// printRuntimeNudge is the soft upsell: when the app claims a flow-dependent
+// feature, static analysis can confirm the code exists but not that the flow
+// works — point the user at the runtime tier.
+func printRuntimeNudge(w *os.File, path string) {
+	claims, err := codescan.DetectClaims(path)
+	if err != nil {
+		return
+	}
+	var feats []string
+	if claims.AccountCreation {
+		feats = append(feats, "account deletion")
+	}
+	if claims.IAP {
+		feats = append(feats, "restore purchases")
+	}
+	if claims.SocialLogin {
+		feats = append(feats, "Sign in with Apple")
+	}
+	if len(feats) == 0 {
+		return
+	}
+	yellow := color.New(color.FgYellow)
+	yellow.Fprintf(w, "  ⚠ Flow-dependent guidelines detected (%s).\n", strings.Join(feats, ", "))
+	dim.Fprintln(w, "    Static analysis can confirm these exist in code — not that they actually work.")
+	dim.Fprintln(w, "    Apple tests these flows manually. Validate them on a real device:")
+	fmt.Fprint(w, "    ")
+	purple.Fprintln(w, "greenlight verify . --build-name \"<your Revyl build>\"")
+	fmt.Fprintln(w)
 }
 
 func writePreflightTerminal(w *os.File, result *preflight.Result) error {
@@ -304,8 +389,8 @@ func printPreflightFooter(w *os.File, result *preflight.Result) {
 	fmt.Fprintln(w)
 }
 
-func writePreflightJSON(w *os.File, result *preflight.Result) error {
-	output := struct {
+func preflightJSONObject(result *preflight.Result) interface{} {
+	return struct {
 		ProjectPath    string              `json:"project_path"`
 		IPAPath        string              `json:"ipa_path,omitempty"`
 		AppName        string              `json:"app_name,omitempty"`
@@ -328,8 +413,25 @@ func writePreflightJSON(w *os.File, result *preflight.Result) error {
 		Summary:        result.Summary,
 		Elapsed:        result.Elapsed.Round(time.Millisecond).String(),
 	}
+}
 
+func writePreflightJSON(w *os.File, result *preflight.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+	return enc.Encode(preflightJSONObject(result))
+}
+
+// writeCombinedJSON emits the static result and the runtime (Revyl) result
+// together under one object — used when --verify is chained with --format json.
+func writeCombinedJSON(w *os.File, result *preflight.Result, vres *verify.Result) error {
+	combined := struct {
+		Static  interface{} `json:"static"`
+		Runtime interface{} `json:"runtime"`
+	}{
+		Static:  preflightJSONObject(result),
+		Runtime: verifyJSONObject(vres),
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(combined)
 }

@@ -261,8 +261,8 @@ func printVerifyFooter(w *os.File, r *verify.Result) {
 	fmt.Fprintln(w)
 }
 
-func writeVerifyJSON(w *os.File, r *verify.Result) error {
-	output := struct {
+func verifyJSONObject(r *verify.Result) interface{} {
+	return struct {
 		ProjectPath string              `json:"project_path"`
 		BuildName   string              `json:"build_name,omitempty"`
 		Claims      interface{}         `json:"claims"`
@@ -279,7 +279,10 @@ func writeVerifyJSON(w *os.File, r *verify.Result) error {
 		DryRun:      r.DryRun,
 		Elapsed:     r.Elapsed.Round(time.Millisecond).String(),
 	}
+}
+
+func writeVerifyJSON(w *os.File, r *verify.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+	return enc.Encode(verifyJSONObject(r))
 }
