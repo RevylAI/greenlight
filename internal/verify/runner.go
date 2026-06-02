@@ -218,21 +218,24 @@ func Run(cfg Config) (*Result, error) {
 		// Enrich with the execution report: the verdict is Revyl's, and the
 		// failing step + reason are the evidence. `revyl test run` can return a
 		// moment before the report finalizes, so poll briefly until it settles.
-		report, _ := client.Report(tname)
+		report, repErr := client.Report(tname)
 		for tries := 0; !report.Decided && tries < 12; tries++ {
 			time.Sleep(3 * time.Second)
-			report, _ = client.Report(tname)
+			report, repErr = client.Report(tname)
 		}
 		reportURL := firstNonEmptyStr(client.ReportShareURL(tname), report.ReportURL)
 
 		switch {
 		case !report.Decided:
-			// The report never finalized: we can't confirm the outcome either way
-			// (a passing OR failing exit code alone is not authoritative). Don't
-			// claim VERIFIED or FAILED on an unknown report.
+			// The report never finalized (or couldn't be fetched): we can't
+			// confirm the outcome either way, so don't claim VERIFIED or FAILED.
 			fr.Status = StatusError
 			fr.ReportURL = reportURL
-			fr.Detail = "could not determine the outcome: the Revyl report did not finalize. Rerun, or open the report."
+			if repErr != nil {
+				fr.Detail = "could not read the Revyl report: " + repErr.Error()
+			} else {
+				fr.Detail = "could not determine the outcome: the Revyl report did not finalize. Rerun, or open the report."
+			}
 		case report.Passed:
 			fr.Status = StatusVerified
 			fr.Detail = "flow ran on-device and behaved correctly"
@@ -349,6 +352,7 @@ func writeTempYAML(name, content string) (string, error) {
 	}
 	path := filepath.Join(dir, name+".yaml")
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		os.RemoveAll(dir)
 		return "", err
 	}
 	return path, nil

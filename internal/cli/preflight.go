@@ -87,18 +87,19 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Banner
-	purple.Println("\n  greenlight preflight — every check, one command, zero uploads.")
-	fmt.Printf("  Project: %s\n", path)
-	if preflightIPA != "" {
-		fmt.Printf("  IPA:     %s\n", preflightIPA)
+	// Banner (suppressed for --format json so stdout stays valid JSON).
+	if strings.ToLower(preflightFormat) != "json" {
+		purple.Println("\n  greenlight preflight — every check, one command, zero uploads.")
+		fmt.Printf("  Project: %s\n", path)
+		if preflightIPA != "" {
+			fmt.Printf("  IPA:     %s\n", preflightIPA)
+		}
+		scanners := []string{"metadata", "codescan", "privacy"}
+		if preflightIPA != "" {
+			scanners = append(scanners, "ipa")
+		}
+		fmt.Printf("  Checks:  %s\n\n", strings.Join(scanners, " + "))
 	}
-
-	scanners := []string{"metadata", "codescan", "privacy"}
-	if preflightIPA != "" {
-		scanners = append(scanners, "ipa")
-	}
-	fmt.Printf("  Checks:  %s\n\n", strings.Join(scanners, " + "))
 
 	// Run all checks
 	start := time.Now()

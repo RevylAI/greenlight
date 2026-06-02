@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -114,6 +115,17 @@ func dedupOnceRules(rules []Rule, findings []Finding) []Finding {
 	if len(once) == 0 {
 		return findings
 	}
+	// Findings are appended from goroutines, so their order is nondeterministic.
+	// Sort by file/line/title so the surviving finding per rule is stable.
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].File != findings[j].File {
+			return findings[i].File < findings[j].File
+		}
+		if findings[i].Line != findings[j].Line {
+			return findings[i].Line < findings[j].Line
+		}
+		return findings[i].Title < findings[j].Title
+	})
 	seen := make(map[string]bool)
 	var out []Finding
 	for _, f := range findings {

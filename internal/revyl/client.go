@@ -308,8 +308,8 @@ func cleanReason(s string) string {
 	s = strings.TrimSpace(s)
 	s = strings.TrimPrefix(s, "Step execution failed: ")
 	s = strings.TrimSpace(s)
-	if len(s) > 180 {
-		s = s[:177] + "..."
+	if r := []rune(s); len(r) > 180 {
+		s = string(r[:177]) + "..."
 	}
 	return s
 }

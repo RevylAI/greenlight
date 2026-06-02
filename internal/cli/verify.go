@@ -91,15 +91,19 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	purple.Println("\n  greenlight verify — does the flow actually work, on a cloud device?")
-	fmt.Printf("  Project: %s\n", path)
-	if verifyBuildName != "" {
-		fmt.Printf("  Build:   %s\n", verifyBuildName)
+	isJSON := strings.ToLower(verifyFormat) == "json"
+	// Keep stdout valid JSON when --format json: no human banner.
+	if !isJSON {
+		purple.Println("\n  greenlight verify — does the flow actually work, on a cloud device?")
+		fmt.Printf("  Project: %s\n", path)
+		if verifyBuildName != "" {
+			fmt.Printf("  Build:   %s\n", verifyBuildName)
+		}
+		if verifyDryRun {
+			dim.Println("  Mode:    dry-run (no device)")
+		}
+		fmt.Println()
 	}
-	if verifyDryRun {
-		dim.Println("  Mode:    dry-run (no device)")
-	}
-	fmt.Println()
 
 	start := time.Now()
 	result, err := verify.Run(verify.Config{
@@ -129,7 +133,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		defer out.Close()
 	}
 
-	if strings.ToLower(verifyFormat) == "json" {
+	if isJSON {
 		return writeVerifyJSON(out, result)
 	}
 	writeVerifyTerminal(out, result)
