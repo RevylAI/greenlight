@@ -52,10 +52,10 @@ func (c *Client) Available() error {
 	if _, err := exec.LookPath(c.Bin); err == nil {
 		return nil
 	}
-	if _, err := os.Stat(c.Bin); err == nil {
+	if fi, err := os.Stat(c.Bin); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
 		return nil
 	}
-	return fmt.Errorf("revyl CLI not found (looked for %q) — install it (https://docs.revyl.com) or pass --revyl <path>", c.Bin)
+	return fmt.Errorf("revyl CLI not found or not executable (looked for %q): install it (https://docs.revyl.com) or pass --revyl <path>", c.Bin)
 }
 
 // Authenticated reports whether the user has a usable Revyl session. Used to
@@ -87,10 +87,12 @@ func (c *Client) AppID(name string) (string, error) {
 			Name string `json:"name"`
 		} `json:"apps"`
 	}
-	if js := extractJSON(out); js != "" {
-		if e := json.Unmarshal([]byte(js), &resp); e != nil {
-			return "", fmt.Errorf("could not parse app list: %w", e)
-		}
+	js := extractJSON(out)
+	if js == "" {
+		return "", fmt.Errorf("could not parse `revyl app list --json`: no JSON in output")
+	}
+	if e := json.Unmarshal([]byte(js), &resp); e != nil {
+		return "", fmt.Errorf("could not parse app list: %w", e)
 	}
 	for _, a := range resp.Apps { // exact match first
 		if a.Name == name {
@@ -251,10 +253,12 @@ func (c *Client) Report(name string) (ReportResult, error) {
 func parseReport(out string) (ReportResult, error) {
 	var res ReportResult
 	var j reportJSON
-	if js := extractJSON(out); js != "" {
-		if e := json.Unmarshal([]byte(js), &j); e != nil {
-			return res, fmt.Errorf("could not parse report JSON: %w", e)
-		}
+	js := extractJSON(out)
+	if js == "" {
+		return res, fmt.Errorf("no JSON found in `revyl test report --json` output")
+	}
+	if e := json.Unmarshal([]byte(js), &j); e != nil {
+		return res, fmt.Errorf("could not parse report JSON: %w", e)
 	}
 
 	res.ReportURL = j.ReportURL

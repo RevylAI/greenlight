@@ -132,8 +132,7 @@ suppressed and you get GREENLIT — but it dead-ends at runtime, and Apple rejec
 §5.1.1(v). `verify` runs the flow on a device and catches it.
 
 ```bash
-greenlight verify .                       # dry-run-style: shows which flows are claimed
-greenlight verify . --dry-run             # print the generated Revyl tests, no device
+greenlight verify . --dry-run             # show which flows are claimed + the generated tests, no device
 greenlight verify . --build-name "My App" \
   --var email=qa@acme.com --var password=secret   # run on a device
 greenlight verify . --build-name "My App" --flows account-deletion --os-version "iOS 26.2"
