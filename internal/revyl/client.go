@@ -131,6 +131,90 @@ func (c *Client) ReportShareURL(name string) string {
 	return firstURL(out)
 }
 
+// ReportResult is the authoritative outcome of a test's latest execution,
+// extracted from `revyl test report --json`. session_status is Revyl's verdict;
+// the failing step's description and reason are the evidence a static scanner
+// can never produce.
+type ReportResult struct {
+	Decided      bool
+	Passed       bool
+	FailedStep   string
+	FailedReason string
+	ReportURL    string
+	DeviceModel  string
+	OSVersion    string
+}
+
+// reportJSON mirrors the real `revyl test report --json` schema.
+type reportJSON struct {
+	SessionStatus string `json:"session_status"`
+	ReportURL     string `json:"report_url"`
+	DeviceModel   string `json:"device_model"`
+	OSVersion     string `json:"os_version"`
+	Steps         []struct {
+		Status                string `json:"status"`
+		EffectiveStatus       string `json:"effective_status"`
+		StepDescription       string `json:"step_description"`
+		StatusReason          string `json:"status_reason"`
+		EffectiveStatusReason string `json:"effective_status_reason"`
+		ExecutionOrder        int    `json:"execution_order"`
+	} `json:"steps"`
+}
+
+// Report fetches the latest execution report for a test and extracts the
+// authoritative verdict plus the first failing step (description + reason).
+func (c *Client) Report(name string) (ReportResult, error) {
+	out, err := c.run("test", "report", name, "--json")
+	if err != nil {
+		return ReportResult{}, fmt.Errorf("revyl test report failed: %w\n%s", err, strings.TrimSpace(out))
+	}
+	return parseReport(out)
+}
+
+// parseReport extracts a verdict + failing-step evidence from the raw output of
+// `revyl test report --json`. Factored out for testing against the real schema.
+func parseReport(out string) (ReportResult, error) {
+	var res ReportResult
+	var j reportJSON
+	if js := extractJSON(out); js != "" {
+		if e := json.Unmarshal([]byte(js), &j); e != nil {
+			return res, fmt.Errorf("could not parse report JSON: %w", e)
+		}
+	}
+
+	res.ReportURL = j.ReportURL
+	res.DeviceModel = j.DeviceModel
+	res.OSVersion = j.OSVersion
+
+	switch strings.ToLower(strings.TrimSpace(j.SessionStatus)) {
+	case "passed", "pass", "success", "succeeded", "completed", "complete", "green":
+		res.Passed, res.Decided = true, true
+	case "failed", "fail", "failure", "error", "errored", "red":
+		res.Passed, res.Decided = false, true
+	}
+
+	for _, s := range j.Steps {
+		switch strings.ToLower(firstNonEmpty(s.EffectiveStatus, s.Status)) {
+		case "failed", "fail", "error", "errored":
+			res.FailedStep = s.StepDescription
+			res.FailedReason = cleanReason(firstNonEmpty(s.StatusReason, s.EffectiveStatusReason))
+			return res, nil
+		}
+	}
+	return res, nil
+}
+
+// cleanReason trims Revyl's verbose step failure reason to a single readable line.
+func cleanReason(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "Step execution failed: ")
+	s = strings.TrimSpace(s)
+	if len(s) > 180 {
+		s = s[:177] + "..."
+	}
+	return s
+}
+
 func (c *Client) run(args ...string) (string, error) {
 	cmd := exec.Command(c.Bin, args...)
 	cmd.Env = os.Environ()

@@ -158,6 +158,9 @@ func writeVerifyTerminal(w *os.File, r *verify.Result) {
 			if f.FailedStep != "" {
 				dim.Fprintf(w, "             failed at: %s\n", f.FailedStep)
 			}
+			if f.FailedReason != "" {
+				dim.Fprintf(w, "             reason: %s\n", f.FailedReason)
+			}
 			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.ReportURL != "" {
 				fmt.Fprint(w, "             report: ")

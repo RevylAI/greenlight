@@ -43,6 +43,7 @@ type FlowResult struct {
 	Status       string `json:"status"`
 	StaticPassed bool   `json:"static_passed"`
 	FailedStep   string `json:"failed_step,omitempty"`
+	FailedReason string `json:"failed_reason,omitempty"`
 	ReportURL    string `json:"report_url,omitempty"`
 	Detail       string `json:"detail,omitempty"`
 	TaskID       string `json:"task_id,omitempty"`
@@ -166,14 +167,23 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		if run.Passed {
+		// Enrich with the execution report: session_status is Revyl's
+		// authoritative verdict, and the failing step + reason are the evidence.
+		report, _ := client.Report(f.TestName)
+		passed := run.Passed
+		if report.Decided {
+			passed = report.Passed
+		}
+
+		if passed {
 			fr.Status = StatusVerified
 			fr.Detail = "flow ran on-device and behaved correctly"
 		} else {
 			fr.Status = StatusFailed
-			fr.FailedStep = run.FailedStep
-			fr.ReportURL = client.ReportShareURL(f.TestName)
-			fr.Detail = staticPassedMessage(f, claims, run.FailedStep)
+			fr.FailedStep = firstNonEmptyStr(report.FailedStep, run.FailedStep)
+			fr.FailedReason = report.FailedReason
+			fr.ReportURL = firstNonEmptyStr(client.ReportShareURL(f.TestName), report.ReportURL)
+			fr.Detail = staticPassedMessage(f, claims, fr.FailedStep)
 		}
 		res.Flows = append(res.Flows, fr)
 	}
@@ -187,16 +197,24 @@ func Run(cfg Config) (*Result, error) {
 func staticPassedMessage(f Flow, c codescan.Claims, failedStep string) string {
 	var b strings.Builder
 	if f.StaticPassed(c) {
-		fmt.Fprintf(&b, "Static analysis PASSED §%s — it found `%s` in your source and suppressed the warning. ", f.Guideline, f.AntiPattern)
+		fmt.Fprintf(&b, "Static analysis PASSED §%s — it found `%s` in your source and suppressed the warning, but the flow failed on a real device", f.Guideline, f.AntiPattern)
 	} else {
-		fmt.Fprintf(&b, "§%s ", f.Guideline)
+		fmt.Fprintf(&b, "The §%s flow failed on a real device", f.Guideline)
 	}
-	b.WriteString("But the flow failed on a real device")
 	if failedStep != "" {
-		fmt.Fprintf(&b, " at: %q", failedStep)
+		fmt.Fprintf(&b, " at %q", failedStep)
 	}
 	b.WriteString(". Apple exercises this flow manually during review.")
 	return b.String()
+}
+
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 func summarize(flows []FlowResult) Summary {
