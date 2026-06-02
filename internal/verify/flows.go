@@ -10,7 +10,7 @@ type Step struct {
 }
 
 // Flow is a flow-dependent App Store guideline. Static analysis can only confirm
-// it by string presence; this tier re-checks it on a real device. Each flow maps
+// it by string presence; this tier re-checks it on a cloud device. Each flow maps
 // to one codescan rule whose anti-pattern suppression is the false-negative risk.
 type Flow struct {
 	ID          string

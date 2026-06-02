@@ -86,13 +86,13 @@ the §5.1.1 warning; it cannot see that the button is wired to nothing. Apple te
 flows manually, so a static pass here is a false sense of security.
 
 If the project claims a flow-dependent feature (account creation, in-app purchases, or
-social login), validate it on a real device with `greenlight verify`:
+social login), validate it on a cloud device with `greenlight verify`:
 
 ```bash
 # See which flows the app claims and the exact tests that would run — no device needed:
 greenlight verify . --dry-run
 
-# Run them on a real device (needs the revyl CLI + `revyl auth login` + a registered build):
+# Run them on a cloud device (needs the revyl CLI + `revyl auth login` + a registered build):
 greenlight verify . --build-name "<your Revyl build>" \
   --var email=<test account> --var password=<test password>
 ```

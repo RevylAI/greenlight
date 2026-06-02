@@ -152,7 +152,7 @@ func Run(cfg Config) (*Result, error) {
 		// No usable Revyl account → pending behind sign-up (see res.Onboarding).
 		if res.Onboarding != nil {
 			fr.Status = StatusPending
-			fr.Detail = "sign up for Revyl to validate this flow on a real device"
+			fr.Detail = "sign up for Revyl to validate this flow on a cloud device"
 			res.Flows = append(res.Flows, fr)
 			continue
 		}
@@ -226,9 +226,9 @@ func Run(cfg Config) (*Result, error) {
 func staticPassedMessage(f Flow, c codescan.Claims, failedStep string) string {
 	var b strings.Builder
 	if f.StaticPassed(c) {
-		fmt.Fprintf(&b, "Static analysis PASSED §%s — it found `%s` in your source and suppressed the warning, but the flow failed on a real device", f.Guideline, f.AntiPattern)
+		fmt.Fprintf(&b, "Static analysis PASSED §%s — it found `%s` in your source and suppressed the warning, but the flow failed on a cloud device", f.Guideline, f.AntiPattern)
 	} else {
-		fmt.Fprintf(&b, "The §%s flow failed on a real device", f.Guideline)
+		fmt.Fprintf(&b, "The §%s flow failed on a cloud device", f.Guideline)
 	}
 	if failedStep != "" {
 		fmt.Fprintf(&b, " at %q", failedStep)

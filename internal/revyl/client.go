@@ -1,5 +1,5 @@
 // Package revyl is a thin wrapper around the `revyl` CLI binary. greenlight's
-// runtime tier shells out to it to drive flow validations on real devices. The
+// runtime tier shells out to it to drive flow validations on cloud devices. The
 // static scanners stay offline and zero-account; only `greenlight verify` reaches
 // for this — that separation is deliberate.
 package revyl

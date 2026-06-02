@@ -30,9 +30,9 @@ var (
 
 var verifyCmd = &cobra.Command{
 	Use:   "verify [path]",
-	Short: "Validate flow-dependent guidelines on a real device via Revyl",
+	Short: "Validate flow-dependent guidelines on a cloud device via Revyl",
 	Long: `Runtime tier. Static checks confirm a flow EXISTS in source; verify confirms
-it WORKS on a real device by handing flow-dependent guidelines to the Revyl CLI.
+it WORKS on a cloud device by handing flow-dependent guidelines to the Revyl CLI.
 
 This catches what static analysis structurally cannot: a 'Delete Account' button
 wired to nothing passes codescan — the string 'deleteAccount' is present, so §5.1.1
@@ -83,7 +83,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path must be a directory: %s", path)
 	}
 
-	purple.Println("\n  greenlight verify — does the flow actually work, on a real device?")
+	purple.Println("\n  greenlight verify — does the flow actually work, on a cloud device?")
 	fmt.Printf("  Project: %s\n", path)
 	if verifyBuildName != "" {
 		fmt.Printf("  Build:   %s\n", verifyBuildName)
@@ -181,7 +181,7 @@ func writeVerifyTerminal(w *os.File, r *verify.Result) {
 		case verify.StatusPending:
 			yellow.Fprint(w, "  [pending]  ")
 			bold.Fprintf(w, "§%s %s\n", f.Guideline, f.Title)
-			dim.Fprintln(w, "             claimed in your code — validate it on a real device with Revyl")
+			dim.Fprintln(w, "             claimed in your code — validate it on a cloud device with Revyl")
 			fmt.Fprintln(w)
 		case verify.StatusSkipped:
 			dim.Fprintf(w, "  [skipped]  §%s %s — %s\n", f.Guideline, f.Title, f.Detail)
@@ -221,7 +221,7 @@ func printSignupCTA(w *os.File, r *verify.Result) {
 
 	n := r.Summary.Pending
 	bold.Fprintf(w, "  %d flow(s) Apple will test that static analysis can't confirm.\n", n)
-	fmt.Fprint(w, "  Validate them on real devices with ")
+	fmt.Fprint(w, "  Validate them on cloud devices with ")
 	purple.Fprint(w, "Revyl")
 	fmt.Fprintln(w, " — free to start.")
 	fmt.Fprintln(w)
@@ -285,7 +285,7 @@ func printVerifyFooter(w *os.File, r *verify.Result) {
 		fmt.Fprintf(w, " — %d flow(s) could not run (see setup notes above)\n", s.Errored)
 	case s.Verified > 0:
 		green.Fprint(w, "  VERIFIED")
-		fmt.Fprintf(w, " — %d flow(s) confirmed working on a real device", s.Verified)
+		fmt.Fprintf(w, " — %d flow(s) confirmed working on a cloud device", s.Verified)
 		if s.Errored > 0 {
 			fmt.Fprintf(w, ", %d could not run", s.Errored)
 		}

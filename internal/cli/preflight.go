@@ -20,7 +20,7 @@ var (
 	preflightOutput string
 
 	// Runtime tier (--verify): after the static checks, hand flow-dependent
-	// guidelines to Revyl to validate on a real device.
+	// guidelines to Revyl to validate on a cloud device.
 	preflightVerify      bool
 	preflightBuildName   string
 	preflightVars        map[string]string
@@ -57,7 +57,7 @@ func init() {
 	preflightCmd.Flags().StringVar(&preflightIPA, "ipa", "", "path to .ipa file for binary inspection")
 	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json")
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
-	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a real device via Revyl")
+	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a cloud device via Revyl")
 	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
 	preflightCmd.Flags().StringToStringVar(&preflightVars, "var", nil, "test variable for --verify, e.g. --var email=qa@acme.com (repeatable)")
 	preflightCmd.Flags().StringVar(&preflightDeviceModel, "device-model", "", "device model for --verify, e.g. \"iPhone 16\"")
@@ -123,12 +123,18 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	isJSON := strings.ToLower(preflightFormat) == "json"
 
 	// Default path: static only — offline, zero-account, instant, and complete
-	// on its own. No Revyl pitch here; the runtime tier is strictly opt-in.
+	// on its own. The runtime tier is strictly opt-in; we only leave a light tip.
 	if !preflightVerify {
 		if isJSON {
 			return writePreflightJSON(output, result)
 		}
-		return writePreflightTerminal(output, result)
+		if err := writePreflightTerminal(output, result); err != nil {
+			return err
+		}
+		dim.Fprintln(output, "  Tip → 'greenlight preflight --verify' also runs your sign-in, purchase, and")
+		dim.Fprintln(output, "        account-deletion flows on a Revyl cloud device to confirm they work.")
+		fmt.Fprintln(output)
+		return nil
 	}
 
 	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
@@ -154,7 +160,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	fmt.Fprintln(output)
-	purple.Fprintln(output, "  → Static checks done. Now validating the flows actually WORK, on a real device…")
+	purple.Fprintln(output, "  → Static checks done. Now validating the flows actually WORK, on a cloud device…")
 	fmt.Fprintln(output)
 	writeVerifyTerminal(output, vres)
 	return nil

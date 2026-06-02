@@ -4,7 +4,7 @@
 
 Greenlight scans your app — source code, privacy manifests, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines, catching rejection risks before Apple does. Fully offline, no account, runs in under a second.
 
-> **Optional runtime tier:** want to confirm flow-dependent guidelines (account deletion, restore purchases, Sign in with Apple) actually *work*, not just exist in source? `greenlight verify` validates them on a real device via [Revyl](https://revyl.com). It's entirely separate and opt-in — the static scanner above never needs it. See [`greenlight verify`](#greenlight-verify-path--runtime-flow-validation-via-revyl).
+> **Optional runtime tier:** want to confirm flow-dependent guidelines (account deletion, restore purchases, Sign in with Apple) actually *work*, not just exist in source? `greenlight verify` validates them on a cloud device via [Revyl](https://revyl.com). It's entirely separate and opt-in — the static scanner above never needs it. See [`greenlight verify`](#greenlight-verify-path--runtime-flow-validation-via-revyl).
 
 ## Install
 
@@ -123,7 +123,7 @@ API-based checks against your app in App Store Connect:
 ### `greenlight verify [path]` — Runtime flow validation (via Revyl)
 
 Static checks confirm a flow **exists** in your source. `verify` confirms it **works**
-on a real device by handing flow-dependent guidelines to the [Revyl](https://revyl.com)
+on a cloud device by handing flow-dependent guidelines to the [Revyl](https://revyl.com)
 CLI and running the actual flow.
 
 This catches what static analysis structurally cannot. A "Delete Account" button wired
@@ -229,7 +229,7 @@ greenlight
 ├── privacy           Privacy-only scanning
 ├── ipa               Binary-only inspection
 │
-├── verify            Runtime flow validation on a real device (via Revyl)
+├── verify            Runtime flow validation on a cloud device (via Revyl)
 │   ├── account-deletion   §5.1.1 — the account is actually deleted
 │   ├── restore-purchases  §3.1.1 — Restore Purchases isn't a no-op
 │   └── sign-in-apple      §4.8   — the Apple sign-in sheet actually appears
@@ -275,4 +275,4 @@ greenlight scan --app-id $APP_ID --format junit --output greenlight.xml
 
 Greenlight catches App Store rejections. [Revyl](https://revyl.com) catches bugs.
 
-The mobile reliability platform. AI-powered testing for mobile apps — write tests in natural language, run them on real devices.
+The mobile reliability platform. AI-powered testing for mobile apps — write tests in natural language, run them on cloud devices.
