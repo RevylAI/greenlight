@@ -121,6 +121,12 @@ func Run(cfg Config) (*Result, error) {
 		}
 	}
 
+	// Resolve the build name to an app id once — `test create --app` needs it.
+	var appID string
+	if res.Onboarding == nil && !cfg.DryRun && cfg.BuildName != "" {
+		appID, _ = client.AppID(cfg.BuildName)
+	}
+
 	for _, f := range AllFlows() {
 		if len(selected) > 0 && !selected[f.ID] {
 			continue
@@ -166,6 +172,12 @@ func Run(cfg Config) (*Result, error) {
 			res.Flows = append(res.Flows, fr)
 			continue
 		}
+		if appID == "" {
+			fr.Status = StatusError
+			fr.Detail = fmt.Sprintf("no Revyl app found matching build name %q — check `revyl app list`", cfg.BuildName)
+			res.Flows = append(res.Flows, fr)
+			continue
+		}
 
 		path, werr := writeTempYAML(tname, fr.YAML)
 		if werr != nil {
@@ -175,7 +187,7 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		if _, cerr := client.EnsureTest(path); cerr != nil {
+		if _, cerr := client.EnsureTest(tname, path, appID); cerr != nil {
 			fr.Status = StatusError
 			fr.Detail = cerr.Error()
 			cleanupTemp(path)

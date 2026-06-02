@@ -2,7 +2,6 @@ package verify
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 )
 
@@ -10,6 +9,11 @@ import (
 // schema at https://docs.revyl.com/appendix/yaml-test-format. The test name is
 // passed in (not Flow.TestName) so it can be made unique per build — a stable
 // name across apps gets silently rebound to the first app's build.
+//
+// Credential values are inlined directly into step text rather than emitted as a
+// `variables:` block: Revyl treats metadata.variables as launch-time values, and
+// for apps that don't expect them the app fails to launch (the run records zero
+// steps). Inlining keeps the launch clean and the steps self-contained.
 func renderTestYAML(f Flow, name, platform, buildName string, vars map[string]string) string {
 	var b strings.Builder
 	b.WriteString("test:\n")
@@ -19,28 +23,26 @@ func renderTestYAML(f Flow, name, platform, buildName string, vars map[string]st
 	b.WriteString("    tags:\n")
 	b.WriteString("      - greenlight\n")
 	b.WriteString("      - runtime\n")
-	if len(vars) > 0 {
-		b.WriteString("    variables:\n")
-		keys := make([]string, 0, len(vars))
-		for k := range vars {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			fmt.Fprintf(&b, "      %s: %s\n", k, yamlStr(vars[k]))
-		}
-	}
 	b.WriteString("  build:\n")
 	fmt.Fprintf(&b, "    name: %s\n", yamlStr(buildName))
 	b.WriteString("  blocks:\n")
 	for _, s := range f.Steps {
 		fmt.Fprintf(&b, "    - type: %s\n", s.Type)
-		fmt.Fprintf(&b, "      step_description: %s\n", yamlStr(s.Desc))
+		fmt.Fprintf(&b, "      step_description: %s\n", yamlStr(substituteVars(s.Desc, vars)))
 		if s.Type == "extraction" && s.VariableName != "" {
 			fmt.Fprintf(&b, "      variable_name: %s\n", yamlStr(s.VariableName))
 		}
 	}
 	return b.String()
+}
+
+// substituteVars replaces {{key}} placeholders with their provided values.
+// Unprovided placeholders are left as-is.
+func substituteVars(s string, vars map[string]string) string {
+	for k, v := range vars {
+		s = strings.ReplaceAll(s, "{{"+k+"}}", v)
+	}
+	return s
 }
 
 // yamlStr returns a safely double-quoted YAML scalar.

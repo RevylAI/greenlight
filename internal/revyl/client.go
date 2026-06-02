@@ -73,10 +73,51 @@ func (c *Client) Authenticated() bool {
 	return strings.Contains(l, "authenticated") || strings.Contains(l, "logged in")
 }
 
-// EnsureTest creates or updates a Revyl test from a YAML file. Idempotent via
-// --force; --no-open keeps it headless.
-func (c *Client) EnsureTest(yamlPath string) (string, error) {
-	out, err := c.run("test", "create", "--from-file", yamlPath, "--no-open", "--force")
+// AppID resolves a registered build/app name to its Revyl app id. Passing the id
+// to `revyl test create --app` is what associates the build for installation —
+// without it, `revyl test run` never installs/launches the app (zero steps).
+func (c *Client) AppID(name string) (string, error) {
+	out, err := c.run("app", "list", "--json")
+	if err != nil {
+		return "", fmt.Errorf("revyl app list failed: %w", err)
+	}
+	var resp struct {
+		Apps []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"apps"`
+	}
+	if js := extractJSON(out); js != "" {
+		if e := json.Unmarshal([]byte(js), &resp); e != nil {
+			return "", fmt.Errorf("could not parse app list: %w", e)
+		}
+	}
+	for _, a := range resp.Apps { // exact match first
+		if a.Name == name {
+			return a.ID, nil
+		}
+	}
+	for _, a := range resp.Apps { // then case-insensitive
+		if strings.EqualFold(a.Name, name) {
+			return a.ID, nil
+		}
+	}
+	return "", fmt.Errorf("no Revyl app named %q", name)
+}
+
+// EnsureTest creates a Revyl test from a YAML file, bound to appID. It deletes
+// any prior test of the same name first so the run is always freshly bound to
+// the right build (a stale --force from an unsynced dir conflicts). Runs in the
+// YAML's own dir so revyl's `.revyl/` scratch never pollutes the user's project.
+func (c *Client) EnsureTest(name, yamlPath, appID string) (string, error) {
+	dir := filepath.Dir(yamlPath)
+	_, _ = c.runIn(dir, "test", "delete", name, "--force") // ignore "not found"
+
+	args := []string{"test", "create", "--from-file", yamlPath, "--no-open"}
+	if appID != "" {
+		args = append(args, "--app", appID)
+	}
+	out, err := c.runIn(dir, args...)
 	if err != nil {
 		return out, fmt.Errorf("revyl test create failed: %w\n%s", err, strings.TrimSpace(out))
 	}
@@ -258,8 +299,15 @@ func cleanReason(s string) string {
 }
 
 func (c *Client) run(args ...string) (string, error) {
+	return c.runIn("", args...)
+}
+
+func (c *Client) runIn(dir string, args ...string) (string, error) {
 	cmd := exec.Command(c.Bin, args...)
 	cmd.Env = os.Environ()
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
