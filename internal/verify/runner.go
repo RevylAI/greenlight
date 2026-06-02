@@ -158,10 +158,12 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		// Unique test name per build — a stable name gets silently rebound to
-		// the first app's build by `revyl test create --force`.
+		// Unique test name per build: a stable name gets silently rebound to the
+		// first app's build by `revyl test create --force`.
 		tname := testName(cfg.BuildName, f.ID)
-		fr.YAML = renderTestYAML(f, tname, platform, cfg.BuildName, cfg.Vars)
+		// The displayed/dry-run YAML redacts secret vars; the executed YAML
+		// (written to the temp file below) uses the real values.
+		fr.YAML = renderTestYAML(f, tname, platform, cfg.BuildName, redactVarsMap(cfg.Vars))
 
 		if cfg.DryRun {
 			fr.Status = StatusSkipped
@@ -194,7 +196,8 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		path, werr := writeTempYAML(tname, fr.YAML)
+		realYAML := renderTestYAML(f, tname, platform, cfg.BuildName, cfg.Vars)
+		path, werr := writeTempYAML(tname, realYAML)
 		if werr != nil {
 			fr.Status = StatusError
 			fr.Detail = "could not stage test file: " + werr.Error()
@@ -230,7 +233,7 @@ func Run(cfg Config) (*Result, error) {
 		// failing step + reason are the evidence. `revyl test run` can return a
 		// moment before the report finalizes, so poll briefly until it settles.
 		report, repErr := client.Report(tname)
-		for tries := 0; !report.Decided && tries < 12; tries++ {
+		for tries := 0; repErr == nil && !report.Decided && tries < 12; tries++ {
 			time.Sleep(3 * time.Second)
 			report, repErr = client.Report(tname)
 		}
@@ -308,6 +311,23 @@ func redactVars(s string, vars map[string]string) string {
 		}
 	}
 	return s
+}
+
+// redactVarsMap returns a copy of vars with sensitive values replaced, for the
+// displayed/dry-run YAML (the executed YAML still uses the real values).
+func redactVarsMap(vars map[string]string) map[string]string {
+	if len(vars) == 0 {
+		return vars
+	}
+	out := make(map[string]string, len(vars))
+	for k, v := range vars {
+		if v != "" && isSensitiveKey(k) {
+			out[k] = "[redacted]"
+		} else {
+			out[k] = v
+		}
+	}
+	return out
 }
 
 func isSensitiveKey(k string) bool {

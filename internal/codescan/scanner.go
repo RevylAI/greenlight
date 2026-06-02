@@ -110,7 +110,7 @@ func dedupOnceRules(rules []Rule, findings []Finding) []Finding {
 	once := make(map[string]bool)
 	for _, r := range rules {
 		if pr, ok := r.(*PatternRule); ok && pr.firstMatchOnly {
-			once[pr.title] = true
+			once[pr.guideline+"\x00"+pr.title] = true
 		}
 	}
 	if len(once) == 0 {
@@ -130,11 +130,12 @@ func dedupOnceRules(rules []Rule, findings []Finding) []Finding {
 	seen := make(map[string]bool)
 	var out []Finding
 	for _, f := range findings {
-		if once[f.Title] {
-			if seen[f.Title] {
+		key := f.Guideline + "\x00" + f.Title
+		if once[key] {
+			if seen[key] {
 				continue
 			}
-			seen[f.Title] = true
+			seen[key] = true
 		}
 		out = append(out, f)
 	}
