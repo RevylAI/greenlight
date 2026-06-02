@@ -140,7 +140,10 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		fr.YAML = renderTestYAML(f, platform, cfg.BuildName, cfg.Vars)
+		// Unique test name per build — a stable name gets silently rebound to
+		// the first app's build by `revyl test create --force`.
+		tname := testName(cfg.BuildName, f.ID)
+		fr.YAML = renderTestYAML(f, tname, platform, cfg.BuildName, cfg.Vars)
 
 		if cfg.DryRun {
 			fr.Status = StatusSkipped
@@ -164,7 +167,7 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		path, werr := writeTempYAML(f.TestName, fr.YAML)
+		path, werr := writeTempYAML(tname, fr.YAML)
 		if werr != nil {
 			fr.Status = StatusError
 			fr.Detail = "could not stage test file: " + werr.Error()
@@ -180,7 +183,7 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		run, rerr := client.RunTest(f.TestName, revyl.RunOpts{
+		run, rerr := client.RunTest(tname, revyl.RunOpts{
 			DeviceModel: cfg.DeviceModel,
 			OSVersion:   cfg.OSVersion,
 			Build:       cfg.Build,
@@ -198,12 +201,12 @@ func Run(cfg Config) (*Result, error) {
 
 		// Enrich with the execution report: the verdict is Revyl's, and the
 		// failing step + reason are the evidence.
-		report, _ := client.Report(f.TestName)
+		report, _ := client.Report(tname)
 		passed := run.Passed
 		if report.Decided {
 			passed = report.Passed
 		}
-		reportURL := firstNonEmptyStr(client.ReportShareURL(f.TestName), report.ReportURL)
+		reportURL := firstNonEmptyStr(client.ReportShareURL(tname), report.ReportURL)
 
 		switch {
 		case passed:
@@ -252,6 +255,33 @@ func firstNonEmptyStr(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// testName builds a per-build Revyl test name so the same flow run against two
+// different apps never collides (a shared name gets rebound to the first build).
+func testName(buildName, flowID string) string {
+	b := slug(buildName)
+	if b == "" {
+		return "greenlight-" + flowID
+	}
+	return "greenlight-" + b + "-" + flowID
+}
+
+// slug lowercases and reduces a string to [a-z0-9-] for use in a test name.
+func slug(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			dash = false
+		case !dash && b.Len() > 0:
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
 }
 
 func summarize(flows []FlowResult) Summary {

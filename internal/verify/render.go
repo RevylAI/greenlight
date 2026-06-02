@@ -7,12 +7,14 @@ import (
 )
 
 // renderTestYAML produces a Revyl test YAML document for a flow, matching the
-// schema at https://docs.revyl.com/appendix/yaml-test-format.
-func renderTestYAML(f Flow, platform, buildName string, vars map[string]string) string {
+// schema at https://docs.revyl.com/appendix/yaml-test-format. The test name is
+// passed in (not Flow.TestName) so it can be made unique per build — a stable
+// name across apps gets silently rebound to the first app's build.
+func renderTestYAML(f Flow, name, platform, buildName string, vars map[string]string) string {
 	var b strings.Builder
 	b.WriteString("test:\n")
 	b.WriteString("  metadata:\n")
-	fmt.Fprintf(&b, "    name: %s\n", yamlStr(f.TestName))
+	fmt.Fprintf(&b, "    name: %s\n", yamlStr(name))
 	fmt.Fprintf(&b, "    platform: %s\n", platform)
 	b.WriteString("    tags:\n")
 	b.WriteString("      - greenlight\n")

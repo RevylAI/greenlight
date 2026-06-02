@@ -16,7 +16,6 @@ type Flow struct {
 	ID          string
 	Guideline   string
 	Title       string
-	TestName    string // stable Revyl test name (idempotent create)
 	StaticRule  string // the codescan rule id this corresponds to
 	AntiPattern string // the source string that makes static PASS (for the message)
 	Steps       []Step
@@ -39,7 +38,6 @@ func AllFlows() []Flow {
 			ID:           "account-deletion",
 			Guideline:    "5.1.1",
 			Title:        "Account deletion must actually delete the account",
-			TestName:     "greenlight-account-deletion",
 			StaticRule:   "account-no-delete",
 			AntiPattern:  "deleteAccount",
 			claimed:      func(c codescan.Claims) bool { return c.AccountCreation },
@@ -56,7 +54,6 @@ func AllFlows() []Flow {
 			ID:           "restore-purchases",
 			Guideline:    "3.1.1",
 			Title:        "Restore Purchases must trigger a real restore",
-			TestName:     "greenlight-restore-purchases",
 			StaticRule:   "iap-no-restore",
 			AntiPattern:  "restorePurchases",
 			claimed:      func(c codescan.Claims) bool { return c.IAP },
@@ -71,7 +68,6 @@ func AllFlows() []Flow {
 			ID:           "sign-in-apple",
 			Guideline:    "4.8",
 			Title:        "Sign in with Apple must actually start Apple sign-in",
-			TestName:     "greenlight-sign-in-with-apple",
 			StaticRule:   "social-login-no-apple",
 			AntiPattern:  "Sign in with Apple",
 			claimed:      func(c codescan.Claims) bool { return c.SocialLogin },
