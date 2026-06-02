@@ -196,22 +196,30 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		// Enrich with the execution report: session_status is Revyl's
-		// authoritative verdict, and the failing step + reason are the evidence.
+		// Enrich with the execution report: the verdict is Revyl's, and the
+		// failing step + reason are the evidence.
 		report, _ := client.Report(f.TestName)
 		passed := run.Passed
 		if report.Decided {
 			passed = report.Passed
 		}
+		reportURL := firstNonEmptyStr(client.ReportShareURL(f.TestName), report.ReportURL)
 
-		if passed {
+		switch {
+		case passed:
 			fr.Status = StatusVerified
 			fr.Detail = "flow ran on-device and behaved correctly"
-		} else {
+		case report.Decided && report.StepsRun == 0:
+			// No step actually executed — a setup/launch failure, NOT a broken
+			// flow. Reporting it as a flow failure would be dishonest.
+			fr.Status = StatusError
+			fr.ReportURL = reportURL
+			fr.Detail = "the flow couldn't run to completion on the cloud device — no steps executed (the app may have failed to launch, or the run aborted before the first step finished). See the report."
+		default:
 			fr.Status = StatusFailed
 			fr.FailedStep = firstNonEmptyStr(report.FailedStep, run.FailedStep)
 			fr.FailedReason = report.FailedReason
-			fr.ReportURL = firstNonEmptyStr(client.ReportShareURL(f.TestName), report.ReportURL)
+			fr.ReportURL = reportURL
 			fr.Detail = staticPassedMessage(f, claims, fr.FailedStep)
 		}
 		res.Flows = append(res.Flows, fr)

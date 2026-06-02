@@ -10,6 +10,8 @@ const sampleFailedReport = `{
   "device_model": "iPhone 17 Pro Max",
   "os_version": "iOS 26.2",
   "session_status": "failed",
+  "success": false,
+  "total_steps": 1,
   "failed_steps": 1,
   "passed_steps": 0,
   "execution_id": "b990b41a-f777-4239-8701-65535e3cf565",
@@ -28,10 +30,29 @@ const sampleFailedReport = `{
 
 const samplePassedReport = `{
   "session_status": "passed",
+  "success": true,
+  "total_steps": 1,
+  "passed_steps": 1,
   "report_url": "https://app.revyl.ai/tests/report?taskId=abc",
   "steps": [
     {"execution_order": 0, "status": "passed", "step_description": "Go to the login screen"}
   ]
+}`
+
+// sampleSetupFailure is the real amazoon case: the run "failed" but executed
+// ZERO steps (build failed to install/launch). This must NOT read as a broken
+// flow — the runner reclassifies a 0-step failure as a setup error.
+const sampleSetupFailure = `{
+  "app_name": "amazoon",
+  "device_model": "iPhone 17 Pro Max",
+  "os_version": "iOS 26.2",
+  "session_status": "failed",
+  "success": false,
+  "total_steps": 0,
+  "failed_steps": 0,
+  "passed_steps": 0,
+  "report_url": "https://app.revyl.ai/tests/report?taskId=1a04ac9e-894e-48f2-8ef3-54692700feb4",
+  "steps": []
 }`
 
 func TestParseReportFailed(t *testing.T) {
@@ -55,8 +76,26 @@ func TestParseReportFailed(t *testing.T) {
 	if r.ReportURL == "" {
 		t.Errorf("ReportURL not extracted")
 	}
+	if r.StepsRun != 1 {
+		t.Errorf("StepsRun = %d, want 1", r.StepsRun)
+	}
 	if r.DeviceModel != "iPhone 17 Pro Max" || r.OSVersion != "iOS 26.2" {
 		t.Errorf("device context not extracted: %q / %q", r.DeviceModel, r.OSVersion)
+	}
+}
+
+// TestParseReportSetupFailure pins the amazoon regression: a failed run that
+// executed zero steps is a setup/launch failure, distinguishable via StepsRun==0.
+func TestParseReportSetupFailure(t *testing.T) {
+	r, err := parseReport(sampleSetupFailure)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !r.Decided || r.Passed {
+		t.Errorf("expected a decided failure, got Decided=%v Passed=%v", r.Decided, r.Passed)
+	}
+	if r.StepsRun != 0 {
+		t.Errorf("StepsRun = %d, want 0 (the runner uses this to flag a setup failure, not a broken flow)", r.StepsRun)
 	}
 }
 

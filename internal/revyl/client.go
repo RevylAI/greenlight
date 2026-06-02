@@ -6,6 +6,7 @@ package revyl
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -117,6 +118,17 @@ func (c *Client) RunTest(name string, opts RunOpts) (RunResult, error) {
 
 	out, runErr := c.run(args...)
 	res := RunResult{Raw: out}
+
+	// A non-exit error means revyl itself couldn't run (binary/IO problem) — a
+	// hard error. A non-zero EXIT is just a failed test; let the report decide
+	// whether that's a broken flow or a setup/launch failure. Never classify
+	// from stdout keywords — that's what the structured report is for.
+	if runErr != nil {
+		var ee *exec.ExitError
+		if !errors.As(runErr, &ee) {
+			return res, fmt.Errorf("could not execute revyl test run: %w\n%s", runErr, strings.TrimSpace(out))
+		}
+	}
 	exitOK := runErr == nil
 
 	var j runJSON
@@ -134,13 +146,6 @@ func (c *Client) RunTest(name string, opts RunOpts) (RunResult, error) {
 	if !res.Passed {
 		res.FailedStep = j.firstFailedStep()
 	}
-
-	// Distinguish "the flow failed" (a real finding) from "couldn't run the flow"
-	// (auth/build/device setup) — the latter must never read as a passed or
-	// failed verdict.
-	if runErr != nil && !decided && looksLikeSetupError(out) {
-		return res, fmt.Errorf("revyl test run could not execute: %w\n%s", runErr, strings.TrimSpace(out))
-	}
 	return res, nil
 }
 
@@ -155,12 +160,14 @@ func (c *Client) ReportShareURL(name string) string {
 }
 
 // ReportResult is the authoritative outcome of a test's latest execution,
-// extracted from `revyl test report --json`. session_status is Revyl's verdict;
-// the failing step's description and reason are the evidence a static scanner
-// can never produce.
+// extracted from `revyl test report --json`. The verdict is Revyl's; the failing
+// step's description and reason are the evidence a static scanner can't produce.
+// StepsRun matters for honesty: a "failed" run that executed zero steps is a
+// setup/launch failure, NOT a flow that broke.
 type ReportResult struct {
 	Decided      bool
 	Passed       bool
+	StepsRun     int
 	FailedStep   string
 	FailedReason string
 	ReportURL    string
@@ -171,6 +178,10 @@ type ReportResult struct {
 // reportJSON mirrors the real `revyl test report --json` schema.
 type reportJSON struct {
 	SessionStatus string `json:"session_status"`
+	Success       *bool  `json:"success"`
+	TotalSteps    int    `json:"total_steps"`
+	PassedSteps   int    `json:"passed_steps"`
+	FailedSteps   int    `json:"failed_steps"`
 	ReportURL     string `json:"report_url"`
 	DeviceModel   string `json:"device_model"`
 	OSVersion     string `json:"os_version"`
@@ -208,12 +219,20 @@ func parseReport(out string) (ReportResult, error) {
 	res.ReportURL = j.ReportURL
 	res.DeviceModel = j.DeviceModel
 	res.OSVersion = j.OSVersion
+	// StepsRun counts steps that actually executed (passed or failed). Zero means
+	// the flow never ran a step — a setup/launch failure, not a broken flow.
+	res.StepsRun = j.PassedSteps + j.FailedSteps
 
-	switch strings.ToLower(strings.TrimSpace(j.SessionStatus)) {
-	case "passed", "pass", "success", "succeeded", "completed", "complete", "green":
-		res.Passed, res.Decided = true, true
-	case "failed", "fail", "failure", "error", "errored", "red":
-		res.Passed, res.Decided = false, true
+	// Prefer the explicit success boolean; fall back to session_status text.
+	if j.Success != nil {
+		res.Passed, res.Decided = *j.Success, true
+	} else {
+		switch strings.ToLower(strings.TrimSpace(j.SessionStatus)) {
+		case "passed", "pass", "success", "succeeded", "completed", "complete", "green":
+			res.Passed, res.Decided = true, true
+		case "failed", "fail", "failure", "error", "errored", "red":
+			res.Passed, res.Decided = false, true
+		}
 	}
 
 	for _, s := range j.Steps {
@@ -318,18 +337,4 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
-}
-
-func looksLikeSetupError(s string) bool {
-	l := strings.ToLower(s)
-	for _, k := range []string{
-		"not authenticated", "unauthorized", "please log in", "auth login",
-		"no build", "build not found", "no device", "no runners", "not found",
-		"quota", "permission denied", "forbidden", "could not connect",
-	} {
-		if strings.Contains(l, k) {
-			return true
-		}
-	}
-	return false
 }
