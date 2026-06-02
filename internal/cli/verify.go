@@ -16,7 +16,7 @@ import (
 var (
 	verifyBuildName   string
 	verifyFlows       []string
-	verifyVars        map[string]string
+	verifyVarsRaw     []string
 	verifyDeviceModel string
 	verifyOSVersion   string
 	verifyPlatform    string
@@ -57,7 +57,7 @@ Usage:
 func init() {
 	verifyCmd.Flags().StringVar(&verifyBuildName, "build-name", "", "Revyl registered build/app name (required to run; maps to YAML build.name)")
 	verifyCmd.Flags().StringSliceVar(&verifyFlows, "flows", nil, "limit to specific flows: account-deletion, restore-purchases, sign-in-apple")
-	verifyCmd.Flags().StringToStringVar(&verifyVars, "var", nil, "test variable, e.g. --var email=qa@acme.com (repeatable)")
+	verifyCmd.Flags().StringArrayVar(&verifyVarsRaw, "var", nil, "test variable, e.g. --var email=qa@acme.com (repeatable)")
 	verifyCmd.Flags().StringVar(&verifyDeviceModel, "device-model", "", "target device model, e.g. \"iPhone 16\"")
 	verifyCmd.Flags().StringVar(&verifyOSVersion, "os-version", "", "target OS version, e.g. \"iOS 26.2\"")
 	verifyCmd.Flags().StringVar(&verifyPlatform, "platform", "ios", "platform: ios or android")
@@ -99,7 +99,7 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		BuildName:   verifyBuildName,
 		Platform:    verifyPlatform,
 		Flows:       verifyFlows,
-		Vars:        verifyVars,
+		Vars:        parseVars(verifyVarsRaw),
 		DeviceModel: verifyDeviceModel,
 		OSVersion:   verifyOSVersion,
 		Build:       verifyBuild,
@@ -126,6 +126,22 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 	writeVerifyTerminal(out, result)
 	return nil
+}
+
+// parseVars turns repeated --var key=value flags into a map. We split on the
+// first '=' ourselves rather than using pflag's StringToString, whose CSV parse
+// mangles values containing commas or multiple '=' (e.g. base64/JWT padding).
+func parseVars(raw []string) map[string]string {
+	if len(raw) == 0 {
+		return nil
+	}
+	m := make(map[string]string, len(raw))
+	for _, kv := range raw {
+		if i := strings.IndexByte(kv, '='); i > 0 {
+			m[kv[:i]] = kv[i+1:]
+		}
+	}
+	return m
 }
 
 func writeVerifyTerminal(w *os.File, r *verify.Result) {
@@ -328,6 +344,7 @@ func verifyJSONObject(r *verify.Result) interface{} {
 		Claims      interface{}         `json:"claims"`
 		Flows       []verify.FlowResult `json:"flows"`
 		Summary     verify.Summary      `json:"summary"`
+		Onboarding  *verify.Onboarding  `json:"onboarding,omitempty"`
 		DryRun      bool                `json:"dry_run"`
 		Elapsed     string              `json:"elapsed"`
 	}{
@@ -336,6 +353,7 @@ func verifyJSONObject(r *verify.Result) interface{} {
 		Claims:      r.Claims,
 		Flows:       r.Flows,
 		Summary:     r.Summary,
+		Onboarding:  r.Onboarding,
 		DryRun:      r.DryRun,
 		Elapsed:     r.Elapsed.Round(time.Millisecond).String(),
 	}

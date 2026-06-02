@@ -64,13 +64,13 @@ func (c *Client) Authenticated() bool {
 	out, err := c.run("auth", "status")
 	l := strings.ToLower(out)
 	if strings.Contains(l, "not authenticated") || strings.Contains(l, "not logged in") ||
-		strings.Contains(l, "no credentials") || strings.Contains(l, "please log in") {
+		strings.Contains(l, "no credentials") || strings.Contains(l, "please log in") ||
+		strings.Contains(l, "logged out") {
 		return false
 	}
-	if err != nil {
-		return false
-	}
-	return strings.Contains(l, "authenticated") || strings.Contains(l, "logged in")
+	// Otherwise trust the exit code: `revyl auth status` succeeds when signed in.
+	// (Don't require a specific success word — the wording/format can change.)
+	return err == nil
 }
 
 // AppID resolves a registered build/app name to its Revyl app id. Passing the id
@@ -377,11 +377,44 @@ var (
 	reJSONURL = regexp.MustCompile(`https?://[^\s"']+`)
 )
 
+// extractJSON returns the first balanced JSON object or array in s, ignoring
+// surrounding spinner/log output and braces inside later log lines. It respects
+// string literals so braces/quotes inside JSON strings don't confuse the scan.
 func extractJSON(s string) string {
-	i := strings.IndexByte(s, '{')
-	j := strings.LastIndexByte(s, '}')
-	if i >= 0 && j > i {
-		return s[i : j+1]
+	start := strings.IndexAny(s, "{[")
+	if start < 0 {
+		return ""
+	}
+	open := s[start]
+	closeB := byte('}')
+	if open == '[' {
+		closeB = ']'
+	}
+	depth, inStr, esc := 0, false, false
+	for i := start; i < len(s); i++ {
+		c := s[i]
+		if inStr {
+			switch {
+			case esc:
+				esc = false
+			case c == '\\':
+				esc = true
+			case c == '"':
+				inStr = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inStr = true
+		case open:
+			depth++
+		case closeB:
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
 	}
 	return ""
 }

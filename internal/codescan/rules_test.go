@@ -17,9 +17,9 @@ func swiftCtx(lines ...string) FileContext {
 	return FileContext{Path: "X.swift", RelPath: "X.swift", Lines: lines, Language: "swift"}
 }
 
-// SwiftUI's `placeholder:` parameter and example hint text are not App
-// Completeness violations — the §2.1 rule must not flag them (it used to fire on
-// the bare word "placeholder", turning normal apps into dozens of warnings).
+// The §2.1 placeholder-content rule must not fire on SwiftUI's `placeholder:`
+// parameter or example hint text. It used to match the bare word "placeholder",
+// turning normal apps into dozens of warnings; re-adding it would fail this test.
 func TestPlaceholderRuleIgnoresSwiftUIPlaceholder(t *testing.T) {
 	r := ruleByID(t, "placeholder-content")
 
@@ -56,7 +56,9 @@ func TestAccountDeleteAntiPatterns(t *testing.T) {
 		}
 	}
 	notSuppress := []string{
-		`Button("Deactivate") {}`, // deactivate != delete
+		`Button("Deactivate") {}`,      // deactivate != delete
+		`let accountClosed = navPop()`, // incidental, not a deletion control
+		`Button("Delete my data") {}`,  // GDPR data deletion != account deletion
 		`let balance = 100`,
 	}
 	for _, line := range notSuppress {

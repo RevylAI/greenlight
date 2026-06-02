@@ -112,6 +112,16 @@ func TestParseReportPassed(t *testing.T) {
 	}
 }
 
+// extractJSON must return the balanced JSON object, ignoring a '}' inside a
+// string value and any trailing log line that contains braces.
+func TestExtractJSONIgnoresTrailingBraces(t *testing.T) {
+	got := extractJSON("{\"a\":1,\"b\":\"x}y\"}\nWARN trailing }brace")
+	want := `{"a":1,"b":"x}y"}`
+	if got != want {
+		t.Errorf("extractJSON = %q, want %q", got, want)
+	}
+}
+
 func TestVerdictAndStepFromRunJSON(t *testing.T) {
 	// Exit-code is the backstop, but explicit JSON verdicts should win when present.
 	pass := true

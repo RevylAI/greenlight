@@ -94,7 +94,38 @@ func (s *Scanner) Scan() ([]Finding, error) {
 	}
 
 	wg.Wait()
+
+	// Collapse "missing safeguard" findings (firstMatchOnly rules) to one each
+	// across the whole project, so the same project-level fact isn't reported
+	// once per file that happens to trigger it.
+	findings = dedupOnceRules(s.rules, findings)
 	return findings, nil
+}
+
+// dedupOnceRules keeps a single finding (by title) for each firstMatchOnly rule,
+// preserving order and leaving every other rule's findings untouched.
+func dedupOnceRules(rules []Rule, findings []Finding) []Finding {
+	once := make(map[string]bool)
+	for _, r := range rules {
+		if pr, ok := r.(*PatternRule); ok && pr.firstMatchOnly {
+			once[pr.title] = true
+		}
+	}
+	if len(once) == 0 {
+		return findings
+	}
+	seen := make(map[string]bool)
+	var out []Finding
+	for _, f := range findings {
+		if once[f.Title] {
+			if seen[f.Title] {
+				continue
+			}
+			seen[f.Title] = true
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func (s *Scanner) collectFiles() ([]FileContext, error) {

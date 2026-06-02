@@ -121,10 +121,11 @@ func Run(cfg Config) (*Result, error) {
 		}
 	}
 
-	// Resolve the build name to an app id once — `test create --app` needs it.
+	// Resolve the build name to an app id once: `test create --app` needs it.
 	var appID string
+	var appIDErr error
 	if res.Onboarding == nil && !cfg.DryRun && cfg.BuildName != "" {
-		appID, _ = client.AppID(cfg.BuildName)
+		appID, appIDErr = client.AppID(cfg.BuildName)
 	}
 
 	for _, f := range AllFlows() {
@@ -174,7 +175,10 @@ func Run(cfg Config) (*Result, error) {
 		}
 		if appID == "" {
 			fr.Status = StatusError
-			fr.Detail = fmt.Sprintf("no Revyl app found matching build name %q — check `revyl app list`", cfg.BuildName)
+			fr.Detail = fmt.Sprintf("could not resolve a Revyl app for build name %q (check `revyl app list`)", cfg.BuildName)
+			if appIDErr != nil {
+				fr.Detail += ": " + appIDErr.Error()
+			}
 			res.Flows = append(res.Flows, fr)
 			continue
 		}
@@ -230,17 +234,24 @@ func Run(cfg Config) (*Result, error) {
 			fr.Status = StatusVerified
 			fr.Detail = "flow ran on-device and behaved correctly"
 		case report.Decided && report.StepsRun == 0:
-			// No step actually executed — a setup/launch failure, NOT a broken
+			// No step actually executed: a setup/launch failure, not a broken
 			// flow. Reporting it as a flow failure would be dishonest.
 			fr.Status = StatusError
 			fr.ReportURL = reportURL
-			fr.Detail = "the flow couldn't run to completion on the cloud device — no steps executed (the app may have failed to launch, or the run aborted before the first step finished). See the report."
-		default:
+			fr.Detail = "the flow could not run to completion on the cloud device: no steps executed (the app may have failed to launch, or the run aborted before the first step finished). See the report."
+		case report.Decided:
+			// Report finalized as a failure with steps executed: a real flow break.
 			fr.Status = StatusFailed
 			fr.FailedStep = firstNonEmptyStr(report.FailedStep, run.FailedStep)
 			fr.FailedReason = report.FailedReason
 			fr.ReportURL = reportURL
 			fr.Detail = staticPassedMessage(f, claims, fr.FailedStep)
+		default:
+			// The report never finalized, so a non-zero exit alone isn't enough to
+			// confirm a real flow failure. Don't cry wolf.
+			fr.Status = StatusError
+			fr.ReportURL = reportURL
+			fr.Detail = "could not determine the outcome: the Revyl report did not finalize. Rerun, or open the report."
 		}
 		res.Flows = append(res.Flows, fr)
 	}

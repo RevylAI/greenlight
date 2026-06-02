@@ -19,7 +19,7 @@ func renderTestYAML(f Flow, name, platform, buildName string, vars map[string]st
 	b.WriteString("test:\n")
 	b.WriteString("  metadata:\n")
 	fmt.Fprintf(&b, "    name: %s\n", yamlStr(name))
-	fmt.Fprintf(&b, "    platform: %s\n", platform)
+	fmt.Fprintf(&b, "    platform: %s\n", yamlStr(platform))
 	b.WriteString("    tags:\n")
 	b.WriteString("      - greenlight\n")
 	b.WriteString("      - runtime\n")
@@ -45,9 +45,14 @@ func substituteVars(s string, vars map[string]string) string {
 	return s
 }
 
-// yamlStr returns a safely double-quoted YAML scalar.
+// yamlStr returns a safely double-quoted YAML scalar. Backslashes are escaped
+// first, then quotes, then control characters are converted to their escape
+// sequences (a raw newline/tab/CR would otherwise terminate or corrupt the scalar).
 func yamlStr(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	s = strings.ReplaceAll(s, "\t", `\t`)
 	return `"` + s + `"`
 }

@@ -151,7 +151,7 @@ func AllRules() []Rule {
 				regexp.MustCompile(`(?i)(createAccount|signUp|register.*user|create.*account|auth\(\)\.createUser)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet|close.*account|closeAccount|account.*clos|cancel.*account|delete.*my.*(data|account)|erase.*account)`),
+				regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet|close.*account|closeAccount|cancel.*account|delete.*my.*account|erase.*account)`),
 			},
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
@@ -287,7 +287,7 @@ type PatternRule struct {
 	antiPatternsGlobal bool             // Check anti-patterns across all files, not just current
 	ignorePatterns     []*regexp.Regexp // Lines matching these are skipped
 	countThreshold     int              // Only report if count exceeds this
-	firstMatchOnly     bool             // Report at most one finding per file (project-level facts)
+	firstMatchOnly     bool             // Project-level fact: cap to one per file; scanner collapses to one per project
 }
 
 func (r *PatternRule) RuleID() string { return r.id }

@@ -23,7 +23,7 @@ var (
 	// guidelines to Revyl to validate on a cloud device.
 	preflightVerify      bool
 	preflightBuildName   string
-	preflightVars        map[string]string
+	preflightVarsRaw     []string
 	preflightDeviceModel string
 	preflightOSVersion   string
 )
@@ -59,7 +59,7 @@ func init() {
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
 	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a cloud device via Revyl")
 	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
-	preflightCmd.Flags().StringToStringVar(&preflightVars, "var", nil, "test variable for --verify, e.g. --var email=qa@acme.com (repeatable)")
+	preflightCmd.Flags().StringArrayVar(&preflightVarsRaw, "var", nil, "test variable for --verify, e.g. --var email=qa@acme.com (repeatable)")
 	preflightCmd.Flags().StringVar(&preflightDeviceModel, "device-model", "", "device model for --verify, e.g. \"iPhone 16\"")
 	preflightCmd.Flags().StringVar(&preflightOSVersion, "os-version", "", "OS version for --verify, e.g. \"iOS 26.2\"")
 	rootCmd.AddCommand(preflightCmd)
@@ -143,7 +143,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		ProjectPath: path,
 		BuildName:   preflightBuildName,
 		Platform:    "ios",
-		Vars:        preflightVars,
+		Vars:        parseVars(preflightVarsRaw),
 		DeviceModel: preflightDeviceModel,
 		OSVersion:   preflightOSVersion,
 	})
