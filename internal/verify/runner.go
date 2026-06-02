@@ -212,8 +212,13 @@ func Run(cfg Config) (*Result, error) {
 		}
 
 		// Enrich with the execution report: the verdict is Revyl's, and the
-		// failing step + reason are the evidence.
+		// failing step + reason are the evidence. `revyl test run` can return a
+		// moment before the report finalizes, so poll briefly until it settles.
 		report, _ := client.Report(tname)
+		for tries := 0; !report.Decided && tries < 12; tries++ {
+			time.Sleep(3 * time.Second)
+			report, _ = client.Report(tname)
+		}
 		passed := run.Passed
 		if report.Decided {
 			passed = report.Passed

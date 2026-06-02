@@ -261,8 +261,20 @@ func parseReport(out string) (ReportResult, error) {
 	res.DeviceModel = j.DeviceModel
 	res.OSVersion = j.OSVersion
 	// StepsRun counts steps that actually executed (passed or failed). Zero means
-	// the flow never ran a step — a setup/launch failure, not a broken flow.
+	// the flow never ran a step — a setup/launch failure, not a broken flow. The
+	// passed/failed counts can lag the per-step statuses, so take the larger of
+	// the two signals.
 	res.StepsRun = j.PassedSteps + j.FailedSteps
+	terminal := 0
+	for _, s := range j.Steps {
+		switch strings.ToLower(firstNonEmpty(s.EffectiveStatus, s.Status)) {
+		case "passed", "pass", "failed", "fail", "error", "errored":
+			terminal++
+		}
+	}
+	if terminal > res.StepsRun {
+		res.StepsRun = terminal
+	}
 
 	// Prefer the explicit success boolean; fall back to session_status text.
 	if j.Success != nil {
