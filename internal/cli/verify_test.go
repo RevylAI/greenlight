@@ -22,3 +22,15 @@ func TestParseVars(t *testing.T) {
 		t.Errorf("nil input should return nil map")
 	}
 }
+
+func TestValidateFlows(t *testing.T) {
+	if err := validateFlows(nil); err != nil {
+		t.Errorf("nil flows should be valid: %v", err)
+	}
+	if err := validateFlows([]string{"account-deletion", "sign-in-apple"}); err != nil {
+		t.Errorf("known flows should be valid: %v", err)
+	}
+	if err := validateFlows([]string{"account-deletion", "nope"}); err == nil {
+		t.Errorf("unknown flow should error")
+	}
+}

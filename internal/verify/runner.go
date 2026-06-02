@@ -223,35 +223,32 @@ func Run(cfg Config) (*Result, error) {
 			time.Sleep(3 * time.Second)
 			report, _ = client.Report(tname)
 		}
-		passed := run.Passed
-		if report.Decided {
-			passed = report.Passed
-		}
 		reportURL := firstNonEmptyStr(client.ReportShareURL(tname), report.ReportURL)
 
 		switch {
-		case passed:
+		case !report.Decided:
+			// The report never finalized: we can't confirm the outcome either way
+			// (a passing OR failing exit code alone is not authoritative). Don't
+			// claim VERIFIED or FAILED on an unknown report.
+			fr.Status = StatusError
+			fr.ReportURL = reportURL
+			fr.Detail = "could not determine the outcome: the Revyl report did not finalize. Rerun, or open the report."
+		case report.Passed:
 			fr.Status = StatusVerified
 			fr.Detail = "flow ran on-device and behaved correctly"
-		case report.Decided && report.StepsRun == 0:
+		case report.StepsRun == 0:
 			// No step actually executed: a setup/launch failure, not a broken
 			// flow. Reporting it as a flow failure would be dishonest.
 			fr.Status = StatusError
 			fr.ReportURL = reportURL
 			fr.Detail = "the flow could not run to completion on the cloud device: no steps executed (the app may have failed to launch, or the run aborted before the first step finished). See the report."
-		case report.Decided:
+		default:
 			// Report finalized as a failure with steps executed: a real flow break.
 			fr.Status = StatusFailed
 			fr.FailedStep = firstNonEmptyStr(report.FailedStep, run.FailedStep)
 			fr.FailedReason = report.FailedReason
 			fr.ReportURL = reportURL
 			fr.Detail = staticPassedMessage(f, claims, fr.FailedStep)
-		default:
-			// The report never finalized, so a non-zero exit alone isn't enough to
-			// confirm a real flow failure. Don't cry wolf.
-			fr.Status = StatusError
-			fr.ReportURL = reportURL
-			fr.Detail = "could not determine the outcome: the Revyl report did not finalize. Rerun, or open the report."
 		}
 		res.Flows = append(res.Flows, fr)
 	}

@@ -83,6 +83,14 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path must be a directory: %s", path)
 	}
 
+	platform := strings.ToLower(strings.TrimSpace(verifyPlatform))
+	if platform != "ios" && platform != "android" {
+		return fmt.Errorf("invalid --platform %q (expected ios or android)", verifyPlatform)
+	}
+	if err := validateFlows(verifyFlows); err != nil {
+		return err
+	}
+
 	purple.Println("\n  greenlight verify — does the flow actually work, on a cloud device?")
 	fmt.Printf("  Project: %s\n", path)
 	if verifyBuildName != "" {
@@ -97,9 +105,9 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	result, err := verify.Run(verify.Config{
 		ProjectPath: path,
 		BuildName:   verifyBuildName,
-		Platform:    verifyPlatform,
 		Flows:       verifyFlows,
 		Vars:        parseVars(verifyVarsRaw),
+		Platform:    platform,
 		DeviceModel: verifyDeviceModel,
 		OSVersion:   verifyOSVersion,
 		Build:       verifyBuild,
@@ -142,6 +150,26 @@ func parseVars(raw []string) map[string]string {
 		}
 	}
 	return m
+}
+
+// validateFlows rejects any --flows id that isn't a known flow, so a typo fails
+// loudly instead of silently selecting nothing.
+func validateFlows(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	known := make(map[string]bool)
+	var all []string
+	for _, f := range verify.AllFlows() {
+		known[f.ID] = true
+		all = append(all, f.ID)
+	}
+	for _, id := range ids {
+		if !known[strings.TrimSpace(id)] {
+			return fmt.Errorf("unknown flow %q (valid: %s)", id, strings.Join(all, ", "))
+		}
+	}
+	return nil
 }
 
 func writeVerifyTerminal(w *os.File, r *verify.Result) {
