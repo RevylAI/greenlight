@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/RevylAI/greenlight/internal/codescan"
 	"github.com/RevylAI/greenlight/internal/preflight"
 	"github.com/RevylAI/greenlight/internal/verify"
 	"github.com/fatih/color"
@@ -123,16 +122,13 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 
 	isJSON := strings.ToLower(preflightFormat) == "json"
 
-	// Default path: static only (offline, zero-account, instant).
+	// Default path: static only — offline, zero-account, instant, and complete
+	// on its own. No Revyl pitch here; the runtime tier is strictly opt-in.
 	if !preflightVerify {
 		if isJSON {
 			return writePreflightJSON(output, result)
 		}
-		if err := writePreflightTerminal(output, result); err != nil {
-			return err
-		}
-		printRuntimeNudge(output, path)
-		return nil
+		return writePreflightTerminal(output, result)
 	}
 
 	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
@@ -162,36 +158,6 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	fmt.Fprintln(output)
 	writeVerifyTerminal(output, vres)
 	return nil
-}
-
-// printRuntimeNudge is the soft upsell: when the app claims a flow-dependent
-// feature, static analysis can confirm the code exists but not that the flow
-// works — point the user at the runtime tier.
-func printRuntimeNudge(w *os.File, path string) {
-	claims, err := codescan.DetectClaims(path)
-	if err != nil {
-		return
-	}
-	var feats []string
-	if claims.AccountCreation {
-		feats = append(feats, "account deletion")
-	}
-	if claims.IAP {
-		feats = append(feats, "restore purchases")
-	}
-	if claims.SocialLogin {
-		feats = append(feats, "Sign in with Apple")
-	}
-	if len(feats) == 0 {
-		return
-	}
-	yellow := color.New(color.FgYellow)
-	yellow.Fprintf(w, "  ⚠ Flow-dependent guidelines detected (%s).\n", strings.Join(feats, ", "))
-	dim.Fprintln(w, "    Static analysis can confirm these exist in code — not that they actually work.")
-	dim.Fprintln(w, "    Apple tests these flows manually. Validate them on a real device:")
-	fmt.Fprint(w, "    ")
-	purple.Fprintln(w, "greenlight verify . --build-name \"<your Revyl build>\"")
-	fmt.Fprintln(w)
 }
 
 func writePreflightTerminal(w *os.File, result *preflight.Result) error {

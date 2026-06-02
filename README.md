@@ -2,7 +2,9 @@
 
 **Know before you submit.** Pre-submission compliance scanner for the Apple App Store.
 
-Greenlight scans your app — source code, privacy manifests, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines, catching rejection risks before Apple does. And with `greenlight verify`, it goes a step further: it validates your flow-dependent guidelines (account deletion, restore purchases, Sign in with Apple) on a **real device** via [Revyl](https://revyl.com) — catching broken flows that static analysis structurally can't.
+Greenlight scans your app — source code, privacy manifests, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines, catching rejection risks before Apple does. Fully offline, no account, runs in under a second.
+
+> **Optional runtime tier:** want to confirm flow-dependent guidelines (account deletion, restore purchases, Sign in with Apple) actually *work*, not just exist in source? `greenlight verify` validates them on a real device via [Revyl](https://revyl.com). It's entirely separate and opt-in — the static scanner above never needs it. See [`greenlight verify`](#greenlight-verify-path--runtime-flow-validation-via-revyl).
 
 ## Install
 
