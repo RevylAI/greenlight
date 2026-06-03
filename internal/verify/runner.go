@@ -3,7 +3,9 @@ package verify
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -44,9 +46,18 @@ type Config struct {
 	DeviceModel string
 	OSVersion   string
 	Build       bool
+	Artifact    string // path to a prebuilt .app/.apk to upload to Revyl before running
 	Timeout     time.Duration
 	DryRun      bool
 	RevylBin    string
+	Open        bool // auto-open the live Revyl session in the browser
+}
+
+// UploadResult records the outcome of uploading a local build artifact to Revyl.
+type UploadResult struct {
+	Artifact string `json:"artifact"`
+	Status   string `json:"status"` // "uploaded" | "failed"
+	Detail   string `json:"detail,omitempty"`
 }
 
 // FlowResult is the per-flow outcome.
@@ -84,6 +95,7 @@ type Result struct {
 	Flows       []FlowResult    `json:"flows"`
 	Summary     Summary         `json:"summary"`
 	Onboarding  *Onboarding     `json:"onboarding,omitempty"`
+	Upload      *UploadResult   `json:"upload,omitempty"`
 	DryRun      bool            `json:"dry_run"`
 	Elapsed     time.Duration   `json:"-"`
 }
@@ -132,11 +144,19 @@ func Run(cfg Config) (*Result, error) {
 		}
 	}
 
-	// Resolve the build name to an app id once: `test create --app` needs it.
+	// If a prebuilt artifact was provided, upload it to Revyl first (registering
+	// the app if its build name is new), so the run installs that local build.
+	// Then resolve the build name to an app id once: `test create --app` needs it.
 	var appID string
 	var appIDErr error
-	if res.Onboarding == nil && !cfg.DryRun && anyClaimed && cfg.BuildName != "" {
-		appID, appIDErr = client.AppID(cfg.BuildName)
+	var uploadErr error
+	if res.Onboarding == nil && !cfg.DryRun && anyClaimed {
+		if cfg.Artifact != "" {
+			res.Upload, appID, uploadErr = uploadLocalBuild(client, cfg, platform)
+		}
+		if uploadErr == nil && appID == "" && cfg.BuildName != "" {
+			appID, appIDErr = client.AppID(cfg.BuildName)
+		}
 	}
 
 	for _, f := range AllFlows() {
@@ -180,6 +200,15 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
+		// A requested local-build upload failed → can't run against it. Surface
+		// the real cause instead of a misleading "could not resolve app".
+		if uploadErr != nil {
+			fr.Status = StatusError
+			fr.Detail = "could not upload the local build to Revyl: " + uploadErr.Error()
+			res.Flows = append(res.Flows, fr)
+			continue
+		}
+
 		if cfg.BuildName == "" {
 			fr.Status = StatusError
 			fr.Detail = "no --build-name provided; cannot map the test to a registered Revyl build"
@@ -213,12 +242,12 @@ func Run(cfg Config) (*Result, error) {
 			continue
 		}
 
-		run, rerr := client.RunTest(tname, revyl.RunOpts{
+		run, rerr := runWithLiveLink(client, tname, revyl.RunOpts{
 			DeviceModel: cfg.DeviceModel,
 			OSVersion:   cfg.OSVersion,
 			Build:       cfg.Build,
 			Timeout:     cfg.Timeout,
-		})
+		}, cfg.Open)
 		cleanupTemp(path)
 		fr.TaskID = run.TaskID
 
@@ -290,6 +319,137 @@ func staticPassedMessage(f Flow, c codescan.Claims, failedStep string) string {
 	}
 	b.WriteString(". Apple exercises this flow manually during review.")
 	return b.String()
+}
+
+// ValidateArtifact checks that a build artifact is one Revyl can ingest: a
+// simulator .app bundle (iOS) or an .apk (Android). Revyl runs on cloud
+// simulators, so a signed device .ipa is the wrong artifact and is rejected
+// with guidance. It also cross-checks the artifact kind against the target
+// platform so a mismatch (e.g. --platform ios with an .apk) fails here, not
+// with a confusing error mid-upload. An empty path is valid (no upload).
+func ValidateArtifact(path, platform string) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("artifact not found: %s", path)
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".app":
+		if !info.IsDir() {
+			return fmt.Errorf("%s: a simulator .app must be an app-bundle directory", path)
+		}
+	case ".apk":
+		if info.IsDir() {
+			return fmt.Errorf("%s: an .apk must be a file", path)
+		}
+	case ".ipa":
+		return fmt.Errorf("Revyl runs on cloud simulators and cannot ingest a device .ipa — build a simulator .app (iOS) or use an .apk (Android): %s", path)
+	default:
+		return fmt.Errorf("unsupported artifact %q — Revyl accepts a simulator .app (iOS) or an .apk (Android)", path)
+	}
+	switch strings.ToLower(strings.TrimSpace(platform)) {
+	case "ios":
+		if ext == ".apk" {
+			return fmt.Errorf("platform is iOS but the artifact is an Android .apk: %s", path)
+		}
+	case "android":
+		if ext == ".app" {
+			return fmt.Errorf("platform is Android but the artifact is an iOS .app: %s", path)
+		}
+	}
+	return nil
+}
+
+// uploadLocalBuild uploads cfg.Artifact to Revyl and returns the upload outcome
+// plus the resolved app id. If the build name already resolves the artifact is
+// uploaded to that app; otherwise a new app is registered first (an explicit,
+// headless step) and the artifact is uploaded to it.
+func uploadLocalBuild(client *revyl.Client, cfg Config, platform string) (*UploadResult, string, error) {
+	ur := &UploadResult{Artifact: cfg.Artifact, Status: "failed"}
+	if err := ValidateArtifact(cfg.Artifact, platform); err != nil {
+		ur.Detail = err.Error()
+		return ur, "", err
+	}
+	if cfg.BuildName == "" {
+		err := fmt.Errorf("--artifact needs --build-name to name or match the Revyl app for the uploaded build")
+		ur.Detail = err.Error()
+		return ur, "", err
+	}
+	// Resolve the app id: use the existing app if the build name resolves, else
+	// register a new app explicitly so `build upload` never needs a TTY.
+	appID, _ := client.AppID(cfg.BuildName)
+	if appID == "" {
+		id, err := client.CreateApp(cfg.BuildName, platform)
+		if err != nil {
+			ur.Detail = err.Error()
+			return ur, "", err
+		}
+		appID = id
+	}
+	fmt.Fprintf(os.Stderr, "  Uploading local build %s → Revyl…\n", filepath.Base(cfg.Artifact))
+	if _, err := client.UploadBuild(cfg.Artifact, appID); err != nil {
+		ur.Detail = err.Error()
+		return ur, appID, err
+	}
+	ur.Status = "uploaded"
+	return ur, appID, nil
+}
+
+// runWithLiveLink runs the test and, while it runs, prints the live Revyl
+// session link to stderr (so you can click it to watch the agent drive the
+// device); with open=true it also auto-opens the link in the browser. stderr
+// keeps --format json on stdout clean.
+func runWithLiveLink(client *revyl.Client, name string, opts revyl.RunOpts, open bool) (revyl.RunResult, error) {
+	type outcome struct {
+		run revyl.RunResult
+		err error
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		r, e := client.RunTest(name, opts)
+		ch <- outcome{r, e}
+	}()
+
+	stop := make(chan struct{})
+	go func() {
+		t := time.NewTicker(2 * time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-t.C:
+				if url := client.SessionURL(name); url != "" {
+					fmt.Fprintf(os.Stderr, "  Watch live: %s\n", url)
+					if open {
+						openBrowser(url)
+					}
+					return
+				}
+			}
+		}
+	}()
+
+	o := <-ch
+	close(stop)
+	return o.run, o.err
+}
+
+// openBrowser opens a URL in the default browser (best-effort, non-blocking).
+func openBrowser(url string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("open", url)
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+	default:
+		cmd = exec.Command("xdg-open", url)
+	}
+	_ = cmd.Start()
 }
 
 func firstNonEmptyStr(vals ...string) string {

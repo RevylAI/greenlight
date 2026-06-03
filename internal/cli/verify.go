@@ -21,7 +21,9 @@ var (
 	verifyOSVersion   string
 	verifyPlatform    string
 	verifyBuild       bool
+	verifyArtifact    string
 	verifyDryRun      bool
+	verifyOpen        bool
 	verifyFormat      string
 	verifyOutput      string
 	verifyRevylBin    string
@@ -62,7 +64,9 @@ func init() {
 	verifyCmd.Flags().StringVar(&verifyOSVersion, "os-version", "", "target OS version, e.g. \"iOS 26.2\"")
 	verifyCmd.Flags().StringVar(&verifyPlatform, "platform", "ios", "platform: ios or android")
 	verifyCmd.Flags().BoolVar(&verifyBuild, "build", false, "build and upload via revyl before running")
+	verifyCmd.Flags().StringVar(&verifyArtifact, "artifact", "", "upload a prebuilt .app (iOS sim) or .apk (Android) to Revyl before running")
 	verifyCmd.Flags().BoolVar(&verifyDryRun, "dry-run", false, "generate the tests but do not execute on a device")
+	verifyCmd.Flags().BoolVar(&verifyOpen, "open", false, "auto-open the live Revyl session in your browser while it runs")
 	verifyCmd.Flags().StringVar(&verifyFormat, "format", "terminal", "output format: terminal, json")
 	verifyCmd.Flags().StringVar(&verifyOutput, "output", "", "write report to file (stdout if omitted)")
 	verifyCmd.Flags().StringVar(&verifyRevylBin, "revyl", "", "path to the revyl binary (default: auto-detect)")
@@ -90,6 +94,17 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	if err := validateFlows(verifyFlows); err != nil {
 		return err
 	}
+	if verifyArtifact != "" {
+		if verifyBuild {
+			return fmt.Errorf("--artifact and --build are mutually exclusive: --artifact uploads a prebuilt binary; --build compiles from .revyl/config.yaml")
+		}
+		if verifyBuildName == "" {
+			return fmt.Errorf("--artifact requires --build-name (to name or match the Revyl app for the uploaded build)")
+		}
+		if err := verify.ValidateArtifact(verifyArtifact, platform); err != nil {
+			return err
+		}
+	}
 
 	isJSON := strings.ToLower(verifyFormat) == "json"
 	// Keep stdout valid JSON when --format json: no human banner.
@@ -99,8 +114,14 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		if verifyBuildName != "" {
 			fmt.Printf("  Build:   %s\n", verifyBuildName)
 		}
+		if verifyArtifact != "" {
+			fmt.Printf("  Upload:  %s\n", verifyArtifact)
+		}
 		if verifyDryRun {
 			dim.Println("  Mode:    dry-run (no device)")
+			if verifyArtifact != "" {
+				dim.Println("  Note:    --artifact upload is skipped in dry-run")
+			}
 		}
 		fmt.Println()
 	}
@@ -115,9 +136,11 @@ func runVerify(cmd *cobra.Command, args []string) error {
 		DeviceModel: verifyDeviceModel,
 		OSVersion:   verifyOSVersion,
 		Build:       verifyBuild,
+		Artifact:    verifyArtifact,
 		Timeout:     time.Duration(verifyTimeout) * time.Second,
 		DryRun:      verifyDryRun,
 		RevylBin:    verifyRevylBin,
+		Open:        verifyOpen,
 	})
 	if err != nil {
 		return fmt.Errorf("verify failed: %w", err)
@@ -181,6 +204,15 @@ func writeVerifyTerminal(w *os.File, r *verify.Result) {
 	yellow := color.New(color.FgYellow)
 	greenC := color.New(color.FgGreen)
 	bold := color.New(color.Bold)
+
+	if r.Upload != nil {
+		switch r.Upload.Status {
+		case "uploaded":
+			greenC.Fprintf(w, "  ✓ Uploaded local build to Revyl: %s\n\n", r.Upload.Artifact)
+		case "failed":
+			red.Fprintf(w, "  ✗ Local build upload failed: %s\n\n", r.Upload.Detail)
+		}
+	}
 
 	var claimed []string
 	if r.Claims.AccountCreation {
@@ -371,14 +403,15 @@ func printVerifyFooter(w *os.File, r *verify.Result) {
 
 func verifyJSONObject(r *verify.Result) interface{} {
 	return struct {
-		ProjectPath string              `json:"project_path"`
-		BuildName   string              `json:"build_name,omitempty"`
-		Claims      interface{}         `json:"claims"`
-		Flows       []verify.FlowResult `json:"flows"`
-		Summary     verify.Summary      `json:"summary"`
-		Onboarding  *verify.Onboarding  `json:"onboarding,omitempty"`
-		DryRun      bool                `json:"dry_run"`
-		Elapsed     string              `json:"elapsed"`
+		ProjectPath string               `json:"project_path"`
+		BuildName   string               `json:"build_name,omitempty"`
+		Claims      interface{}          `json:"claims"`
+		Flows       []verify.FlowResult  `json:"flows"`
+		Summary     verify.Summary       `json:"summary"`
+		Onboarding  *verify.Onboarding   `json:"onboarding,omitempty"`
+		Upload      *verify.UploadResult `json:"upload,omitempty"`
+		DryRun      bool                 `json:"dry_run"`
+		Elapsed     string               `json:"elapsed"`
 	}{
 		ProjectPath: r.ProjectPath,
 		BuildName:   r.BuildName,
@@ -386,6 +419,7 @@ func verifyJSONObject(r *verify.Result) interface{} {
 		Flows:       r.Flows,
 		Summary:     r.Summary,
 		Onboarding:  r.Onboarding,
+		Upload:      r.Upload,
 		DryRun:      r.DryRun,
 		Elapsed:     r.Elapsed.Round(time.Millisecond).String(),
 	}

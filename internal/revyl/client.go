@@ -107,6 +107,51 @@ func (c *Client) AppID(name string) (string, error) {
 	return "", fmt.Errorf("no Revyl app named %q", name)
 }
 
+// CreateApp registers a new app (a named container for build versions) and
+// returns its id. This is an explicit, headless step: `build upload --name` on
+// an unconfigured project otherwise drops into an interactive app picker that
+// hangs when there's no TTY (we shell out without one).
+func (c *Client) CreateApp(name, platform string) (string, error) {
+	if platform == "" {
+		platform = "ios"
+	}
+	out, err := c.run("app", "create", "--name", name, "--platform", platform, "--json")
+	if err != nil {
+		return "", fmt.Errorf("revyl app create failed: %w\n%s", err, strings.TrimSpace(out))
+	}
+	js := extractJSON(out)
+	if js == "" {
+		return "", fmt.Errorf("could not parse `revyl app create --json`: no JSON in output")
+	}
+	var r struct {
+		ID    string `json:"id"`
+		AppID string `json:"app_id"`
+	}
+	if e := json.Unmarshal([]byte(js), &r); e != nil {
+		return "", fmt.Errorf("could not parse app create response: %w", e)
+	}
+	id := firstNonEmpty(r.ID, r.AppID)
+	if id == "" {
+		return "", fmt.Errorf("revyl app create returned no app id")
+	}
+	return id, nil
+}
+
+// UploadBuild uploads a PRE-BUILT artifact to an existing Revyl app (by id) and
+// marks it current, so the subsequent `test run` installs it. Revyl runs on
+// cloud simulators, so it ingests a simulator .app bundle (iOS) or an .apk
+// (Android) — never a signed device .ipa. `--file` skips any config-based build.
+func (c *Client) UploadBuild(artifact, appID string) (string, error) {
+	if appID == "" {
+		return "", fmt.Errorf("UploadBuild needs an app id")
+	}
+	out, err := c.run("build", "upload", "--file", artifact, "--app", appID, "--set-current")
+	if err != nil {
+		return out, fmt.Errorf("revyl build upload failed: %w\n%s", err, strings.TrimSpace(out))
+	}
+	return out, nil
+}
+
 // EnsureTest creates a Revyl test from a YAML file, bound to appID. It deletes
 // any prior test of the same name first so the run is always freshly bound to
 // the right build (a stale --force from an unsynced dir conflicts). Runs in the
@@ -190,6 +235,29 @@ func (c *Client) RunTest(name string, opts RunOpts) (RunResult, error) {
 		res.FailedStep = j.firstFailedStep()
 	}
 	return res, nil
+}
+
+// SessionURL returns the live session view link for a test's current execution,
+// best-effort (empty until the session registers). Format:
+//
+//	https://app.revyl.ai/sessions/<session_id>?wfr=<execution_id>
+func (c *Client) SessionURL(name string) string {
+	out, err := c.run("test", "report", name, "--json")
+	if err != nil {
+		return ""
+	}
+	js := extractJSON(out)
+	if js == "" {
+		return ""
+	}
+	var r struct {
+		SessionID   string `json:"session_id"`
+		ExecutionID string `json:"execution_id"`
+	}
+	if json.Unmarshal([]byte(js), &r) != nil || r.SessionID == "" || r.ExecutionID == "" {
+		return ""
+	}
+	return fmt.Sprintf("https://app.revyl.ai/sessions/%s?wfr=%s", r.SessionID, r.ExecutionID)
 }
 
 // ReportShareURL returns a public shareable report link for the test's latest

@@ -95,6 +95,12 @@ greenlight verify . --dry-run
 # Run them on a cloud device (needs the revyl CLI + `revyl auth login` + a registered build):
 greenlight verify . --build-name "<your Revyl build>" \
   --var email=<test account> --var password=<test password>
+
+# Have a local build that isn't on Revyl yet? Upload it as part of the run with
+# --artifact. Revyl runs on cloud simulators, so pass a simulator .app (iOS) or
+# an .apk (Android) — NOT a device .ipa. A new --build-name registers a new app.
+greenlight verify . --build-name "<your Revyl build>" --artifact ./build/MyApp.app \
+  --var email=<test account> --var password=<test password>
 ```
 
 `verify` runs each claimed flow on-device via Revyl and reports:
@@ -103,6 +109,8 @@ greenlight verify . --build-name "<your Revyl build>" \
   dead-ends, Restore Purchases is a no-op, Sign in with Apple is a dead button). Fix the
   wiring — not just the presence of the string — and re-run.
 - **SETUP** — could not run (not authenticated, no build, no device). Resolve and retry.
+  If the build just isn't on Revyl yet but you have a local simulator `.app`/`.apk`,
+  pass it with `--artifact` to upload and run in one step.
 
 Treat a FAILED flow exactly like a CRITICAL: it will get the app rejected. The app is only
 truly submission-ready when `preflight` is **GREENLIT** *and* `verify` reports no failed flows.

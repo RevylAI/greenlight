@@ -23,6 +23,7 @@ var (
 	// guidelines to Revyl to validate on a cloud device.
 	preflightVerify      bool
 	preflightBuildName   string
+	preflightArtifact    string
 	preflightVarsRaw     []string
 	preflightDeviceModel string
 	preflightOSVersion   string
@@ -59,6 +60,7 @@ func init() {
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
 	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a cloud device via Revyl")
 	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
+	preflightCmd.Flags().StringVar(&preflightArtifact, "artifact", "", "upload a prebuilt .app (iOS sim) or .apk (Android) to Revyl before --verify runs")
 	preflightCmd.Flags().StringArrayVar(&preflightVarsRaw, "var", nil, "test variable for --verify, e.g. --var email=qa@acme.com (repeatable)")
 	preflightCmd.Flags().StringVar(&preflightDeviceModel, "device-model", "", "device model for --verify, e.g. \"iPhone 16\"")
 	preflightCmd.Flags().StringVar(&preflightOSVersion, "os-version", "", "OS version for --verify, e.g. \"iOS 26.2\"")
@@ -139,6 +141,16 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	}
 
 	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
+	if preflightArtifact != "" {
+		if preflightBuildName == "" {
+			return fmt.Errorf("--artifact requires --build-name (to name or match the Revyl app for the uploaded build)")
+		}
+		// preflight's runtime tier is iOS-only (App Store), matching the
+		// hardcoded Platform: "ios" passed to verify.Run below.
+		if err := verify.ValidateArtifact(preflightArtifact, "ios"); err != nil {
+			return err
+		}
+	}
 	vstart := time.Now()
 	vres, verr := verify.Run(verify.Config{
 		ProjectPath: path,
@@ -147,6 +159,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		Vars:        parseVars(preflightVarsRaw),
 		DeviceModel: preflightDeviceModel,
 		OSVersion:   preflightOSVersion,
+		Artifact:    preflightArtifact,
 	})
 	if verr != nil {
 		return fmt.Errorf("runtime validation failed: %w", verr)
