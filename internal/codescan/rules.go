@@ -36,7 +36,7 @@ func AllRules() []Rule {
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(sk_live_|sk_test_|pk_live_|pk_test_)[a-zA-Z0-9]{20,}`),
 				regexp.MustCompile(`(?i)(api[_-]?key|api[_-]?secret|secret[_-]?key)\s*[:=]\s*["'][a-zA-Z0-9]{20,}["']`),
-				regexp.MustCompile(`(?i)AKIA[0-9A-Z]{16}`), // AWS access key
+				regexp.MustCompile(`(?i)AKIA[0-9A-Z]{16}`),    // AWS access key
 				regexp.MustCompile(`(?i)ghp_[a-zA-Z0-9]{36}`), // GitHub token
 			},
 		},
@@ -96,13 +96,14 @@ func AllRules() []Rule {
 			languages: []string{"swift", "objc", "typescript", "javascript"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(firebase.*analytics|google.*analytics|facebook.*sdk|fbsdk|adjust.*sdk|appsflyer|mixpanel)`),
-			regexp.MustCompile(`(?i)(import\s+Amplitude|AmplitudeSwift|amplitude\.init|Amplitude\.instance|amplitude-js|@amplitude/)`),
+				regexp.MustCompile(`(?i)(import\s+Amplitude|AmplitudeSwift|amplitude\.init|Amplitude\.instance|amplitude-js|@amplitude/)`),
 				regexp.MustCompile(`(?i)(import.*@segment/|analytics-react-native|SegmentAnalytics|createClient.*writeKey)`),
 			},
 			antiPatterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency)`),
 			},
 			antiPatternsGlobal: true,
+			firstMatchOnly:     true,
 		},
 		&PatternRule{
 			id:        "social-login-no-apple",
@@ -119,6 +120,7 @@ func AllRules() []Rule {
 				regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication)`),
 			},
 			antiPatternsGlobal: true,
+			firstMatchOnly:     true,
 		},
 		&PatternRule{
 			id:        "iap-no-restore",
@@ -135,6 +137,7 @@ func AllRules() []Rule {
 				regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases)`),
 			},
 			antiPatternsGlobal: true,
+			firstMatchOnly:     true,
 		},
 		&PatternRule{
 			id:        "account-no-delete",
@@ -148,9 +151,10 @@ func AllRules() []Rule {
 				regexp.MustCompile(`(?i)(createAccount|signUp|register.*user|create.*account|auth\(\)\.createUser)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet)`),
+				regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet|close.*account|closeAccount|cancel.*account|delete.*my.*account|erase.*account)`),
 			},
 			antiPatternsGlobal: true,
+			firstMatchOnly:     true,
 		},
 
 		// MEDIUM - May cause issues
@@ -178,10 +182,10 @@ func AllRules() []Rule {
 			fix:       "Replace all placeholder text with final content.",
 			languages: []string{"swift", "objc", "typescript", "javascript"},
 			patterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)"[^"]*\b(lorem ipsum|placeholder|coming soon|under construction|todo|tbd)\b[^"]*"`),
-				regexp.MustCompile(`(?i)'[^']*\b(lorem ipsum|placeholder|coming soon|under construction|todo|tbd)\b[^']*'`),
-				regexp.MustCompile("(?i)`[^`]*\\b(lorem ipsum|placeholder|coming soon|under construction|todo|tbd)\\b[^`]*`"),
-				regexp.MustCompile(`(?i)\b(lorem ipsum|placeholder|coming soon|under construction|todo|tbd)\b`), // bare text (JSX content)
+				regexp.MustCompile(`(?i)"[^"]*\b(lorem ipsum|coming soon|under construction|todo|tbd)\b[^"]*"`),
+				regexp.MustCompile(`(?i)'[^']*\b(lorem ipsum|coming soon|under construction|todo|tbd)\b[^']*'`),
+				regexp.MustCompile("(?i)`[^`]*\\b(lorem ipsum|coming soon|under construction|todo|tbd)\\b[^`]*`"),
+				regexp.MustCompile(`(?i)\b(lorem ipsum|coming soon|under construction|todo|tbd)\b`), // bare text (JSX content)
 			},
 			ignorePatterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(func\s+placeholder\s*\(|\.placeholder\s*[:=]|placeholder\s*[:=]\s*[A-Z]|placeholder\s*\(in\s*context)`), // Swift/WidgetKit protocol methods and property assignments
@@ -283,6 +287,7 @@ type PatternRule struct {
 	antiPatternsGlobal bool             // Check anti-patterns across all files, not just current
 	ignorePatterns     []*regexp.Regexp // Lines matching these are skipped
 	countThreshold     int              // Only report if count exceeds this
+	firstMatchOnly     bool             // Project-level fact: cap to one per file; scanner collapses to one per project
 }
 
 func (r *PatternRule) RuleID() string { return r.id }
@@ -354,6 +359,13 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 		return nil
 	}
 
+	// "Missing safeguard" rules describe a project-level fact (e.g. account
+	// creation exists but deletion doesn't) — one finding is enough, not one per
+	// matching line.
+	if r.firstMatchOnly && len(findings) > 1 {
+		findings = findings[:1]
+	}
+
 	return findings
 }
 
@@ -374,15 +386,15 @@ func (r *PlistKeyRule) Check(fc FileContext) []Finding {
 	var findings []Finding
 
 	requiredIfUsed := map[string]string{
-		"NSCameraUsageDescription":          "Camera",
-		"NSMicrophoneUsageDescription":      "Microphone",
-		"NSPhotoLibraryUsageDescription":    "Photo Library",
+		"NSCameraUsageDescription":            "Camera",
+		"NSMicrophoneUsageDescription":        "Microphone",
+		"NSPhotoLibraryUsageDescription":      "Photo Library",
 		"NSLocationWhenInUseUsageDescription": "Location (When In Use)",
-		"NSLocationAlwaysUsageDescription":  "Location (Always)",
-		"NSBluetoothAlwaysUsageDescription": "Bluetooth",
-		"NSMotionUsageDescription":          "Motion/Accelerometer",
-		"NSFaceIDUsageDescription":          "Face ID",
-		"NSUserTrackingUsageDescription":    "App Tracking",
+		"NSLocationAlwaysUsageDescription":    "Location (Always)",
+		"NSBluetoothAlwaysUsageDescription":   "Bluetooth",
+		"NSMotionUsageDescription":            "Motion/Accelerometer",
+		"NSFaceIDUsageDescription":            "Face ID",
+		"NSUserTrackingUsageDescription":      "App Tracking",
 	}
 
 	for key, name := range requiredIfUsed {

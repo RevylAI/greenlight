@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -94,7 +95,51 @@ func (s *Scanner) Scan() ([]Finding, error) {
 	}
 
 	wg.Wait()
+
+	// Collapse "missing safeguard" findings (firstMatchOnly rules) to one each
+	// across the whole project, so the same project-level fact isn't reported
+	// once per file that happens to trigger it.
+	findings = dedupOnceRules(s.rules, findings)
 	return findings, nil
+}
+
+// dedupOnceRules keeps a single finding (by title) for each firstMatchOnly rule.
+// It stably sorts all findings by file/line/title first so the surviving finding
+// is deterministic; other rules' findings are otherwise kept.
+func dedupOnceRules(rules []Rule, findings []Finding) []Finding {
+	once := make(map[string]bool)
+	for _, r := range rules {
+		if pr, ok := r.(*PatternRule); ok && pr.firstMatchOnly {
+			once[pr.guideline+"\x00"+pr.title] = true
+		}
+	}
+	if len(once) == 0 {
+		return findings
+	}
+	// Findings are appended from goroutines, so their order is nondeterministic.
+	// Sort by file/line/title so the surviving finding per rule is stable.
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].File != findings[j].File {
+			return findings[i].File < findings[j].File
+		}
+		if findings[i].Line != findings[j].Line {
+			return findings[i].Line < findings[j].Line
+		}
+		return findings[i].Title < findings[j].Title
+	})
+	seen := make(map[string]bool)
+	var out []Finding
+	for _, f := range findings {
+		key := f.Guideline + "\x00" + f.Title
+		if once[key] {
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+		}
+		out = append(out, f)
+	}
+	return out
 }
 
 func (s *Scanner) collectFiles() ([]FileContext, error) {

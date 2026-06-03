@@ -8,8 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/RevylAI/greenlight/internal/preflight"
+	"github.com/RevylAI/greenlight/internal/verify"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 
@@ -17,6 +18,15 @@ var (
 	preflightIPA    string
 	preflightFormat string
 	preflightOutput string
+
+	// Runtime tier (--verify): after the static checks, hand flow-dependent
+	// guidelines to Revyl to validate on a cloud device.
+	preflightVerify      bool
+	preflightBuildName   string
+	preflightArtifact    string
+	preflightVarsRaw     []string
+	preflightDeviceModel string
+	preflightOSVersion   string
 )
 
 var preflightCmd = &cobra.Command{
@@ -31,10 +41,15 @@ Combines:
   • Metadata scan — app.json / Info.plist completeness, icons, version, bundle ID
   • IPA inspect   — binary analysis (if --ipa is provided)
 
+Add --verify to continue past the static checks and validate your flow-dependent
+guidelines (account deletion, restore purchases, Sign in with Apple) on a REAL
+device via Revyl — catching broken flows static analysis structurally can't.
+
 Usage:
   greenlight preflight .
   greenlight preflight ./my-app --ipa build.ipa
-  greenlight preflight /path/to/project --format json`,
+  greenlight preflight /path/to/project --format json
+  greenlight preflight . --verify --build-name "My App" --var email=qa@acme.com --var password=secret`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPreflight,
 }
@@ -43,6 +58,12 @@ func init() {
 	preflightCmd.Flags().StringVar(&preflightIPA, "ipa", "", "path to .ipa file for binary inspection")
 	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json")
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
+	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a cloud device via Revyl")
+	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
+	preflightCmd.Flags().StringVar(&preflightArtifact, "artifact", "", "upload a prebuilt .app (iOS sim) or .apk (Android) to Revyl before --verify runs")
+	preflightCmd.Flags().StringArrayVar(&preflightVarsRaw, "var", nil, "test variable for --verify, e.g. --var email=qa@acme.com (repeatable)")
+	preflightCmd.Flags().StringVar(&preflightDeviceModel, "device-model", "", "device model for --verify, e.g. \"iPhone 16\"")
+	preflightCmd.Flags().StringVar(&preflightOSVersion, "os-version", "", "OS version for --verify, e.g. \"iOS 26.2\"")
 	rootCmd.AddCommand(preflightCmd)
 }
 
@@ -68,18 +89,19 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Banner
-	purple.Println("\n  greenlight preflight — every check, one command, zero uploads.")
-	fmt.Printf("  Project: %s\n", path)
-	if preflightIPA != "" {
-		fmt.Printf("  IPA:     %s\n", preflightIPA)
+	// Banner (suppressed for --format json so stdout stays valid JSON).
+	if strings.ToLower(preflightFormat) != "json" {
+		purple.Println("\n  greenlight preflight — every check, one command, zero uploads.")
+		fmt.Printf("  Project: %s\n", path)
+		if preflightIPA != "" {
+			fmt.Printf("  IPA:     %s\n", preflightIPA)
+		}
+		scanners := []string{"metadata", "codescan", "privacy"}
+		if preflightIPA != "" {
+			scanners = append(scanners, "ipa")
+		}
+		fmt.Printf("  Checks:  %s\n\n", strings.Join(scanners, " + "))
 	}
-
-	scanners := []string{"metadata", "codescan", "privacy"}
-	if preflightIPA != "" {
-		scanners = append(scanners, "ipa")
-	}
-	fmt.Printf("  Checks:  %s\n\n", strings.Join(scanners, " + "))
 
 	// Run all checks
 	start := time.Now()
@@ -101,12 +123,61 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		output = os.Stdout
 	}
 
-	switch strings.ToLower(preflightFormat) {
-	case "json":
-		return writePreflightJSON(output, result)
-	default:
-		return writePreflightTerminal(output, result)
+	isJSON := strings.ToLower(preflightFormat) == "json"
+
+	// Default path: static only — offline, zero-account, instant, and complete
+	// on its own. The runtime tier is strictly opt-in; we only leave a light tip.
+	if !preflightVerify {
+		if isJSON {
+			return writePreflightJSON(output, result)
+		}
+		if err := writePreflightTerminal(output, result); err != nil {
+			return err
+		}
+		dim.Fprintln(output, "  Tip → 'greenlight preflight --verify' also runs your sign-in, purchase, and")
+		dim.Fprintln(output, "        account-deletion flows on a Revyl cloud device to confirm they work.")
+		fmt.Fprintln(output)
+		return nil
 	}
+
+	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
+	if preflightArtifact != "" {
+		if preflightBuildName == "" {
+			return fmt.Errorf("--artifact requires --build-name (to name or match the Revyl app for the uploaded build)")
+		}
+		// preflight's runtime tier is iOS-only (App Store), matching the
+		// hardcoded Platform: "ios" passed to verify.Run below.
+		if err := verify.ValidateArtifact(preflightArtifact, "ios"); err != nil {
+			return err
+		}
+	}
+	vstart := time.Now()
+	vres, verr := verify.Run(verify.Config{
+		ProjectPath: path,
+		BuildName:   preflightBuildName,
+		Platform:    "ios",
+		Vars:        parseVars(preflightVarsRaw),
+		DeviceModel: preflightDeviceModel,
+		OSVersion:   preflightOSVersion,
+		Artifact:    preflightArtifact,
+	})
+	if verr != nil {
+		return fmt.Errorf("runtime validation failed: %w", verr)
+	}
+	vres.Elapsed = time.Since(vstart)
+
+	if isJSON {
+		return writeCombinedJSON(output, result, vres)
+	}
+
+	if err := writePreflightTerminal(output, result); err != nil {
+		return err
+	}
+	fmt.Fprintln(output)
+	purple.Fprintln(output, "  → Static checks done. Now validating the flows actually WORK, on a cloud device…")
+	fmt.Fprintln(output)
+	writeVerifyTerminal(output, vres)
+	return nil
 }
 
 func writePreflightTerminal(w *os.File, result *preflight.Result) error {
@@ -304,8 +375,8 @@ func printPreflightFooter(w *os.File, result *preflight.Result) {
 	fmt.Fprintln(w)
 }
 
-func writePreflightJSON(w *os.File, result *preflight.Result) error {
-	output := struct {
+func preflightJSONObject(result *preflight.Result) interface{} {
+	return struct {
 		ProjectPath    string              `json:"project_path"`
 		IPAPath        string              `json:"ipa_path,omitempty"`
 		AppName        string              `json:"app_name,omitempty"`
@@ -328,8 +399,25 @@ func writePreflightJSON(w *os.File, result *preflight.Result) error {
 		Summary:        result.Summary,
 		Elapsed:        result.Elapsed.Round(time.Millisecond).String(),
 	}
+}
 
+func writePreflightJSON(w *os.File, result *preflight.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(output)
+	return enc.Encode(preflightJSONObject(result))
+}
+
+// writeCombinedJSON emits the static result and the runtime (Revyl) result
+// together under one object — used when --verify is chained with --format json.
+func writeCombinedJSON(w *os.File, result *preflight.Result, vres *verify.Result) error {
+	combined := struct {
+		Static  interface{} `json:"static"`
+		Runtime interface{} `json:"runtime"`
+	}{
+		Static:  preflightJSONObject(result),
+		Runtime: verifyJSONObject(vres),
+	}
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(combined)
 }
