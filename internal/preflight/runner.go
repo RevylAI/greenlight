@@ -1,6 +1,7 @@
 package preflight
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -54,6 +55,12 @@ func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
 		IPAPath:     ipaPath,
 	}
 
+	// Optional .greenlight.yml (rule overrides / ignores) for the code scan.
+	cfg, err := codescan.LoadConfig(projectPath)
+	if err != nil {
+		return nil, fmt.Errorf("config: %w", err)
+	}
+
 	var (
 		mu sync.Mutex
 		wg sync.WaitGroup
@@ -82,7 +89,7 @@ func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		scanner := codescan.NewScanner(projectPath, verbose)
+		scanner := codescan.NewScannerWithConfig(projectPath, verbose, cfg)
 		findings, err := scanner.Scan()
 		if err != nil {
 			errs <- err

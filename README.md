@@ -172,6 +172,26 @@ All scan commands support:
 --output file.json  # write to file instead of stdout
 ```
 
+## Configuration (`.greenlight.yml`)
+
+Drop a `.greenlight.yml` in your project root to tune the code scan — disable a
+rule, change a rule's severity, or ignore paths:
+
+```yaml
+rules:
+  hardcoded-ipv4:
+    severity: info        # downgrade (info | warn | critical)
+  platform-reference:
+    enabled: false        # turn a rule off
+ignore:
+  - vendor                # skip a directory (anywhere in the tree)
+  - "*.generated.ts"      # skip by filename
+  - src/legacy            # skip a path
+```
+
+It applies to the code scan (`codescan`, and the codescan part of `preflight`).
+Point at a specific file with `codescan --config path/to/.greenlight.yml`.
+
 ## Claude Code Skill
 
 Greenlight works as a Claude Code skill for AI-assisted compliance fixing. Claude runs the scan, reads the output, fixes every issue in your code, and re-runs until GREENLIT.

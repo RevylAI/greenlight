@@ -17,6 +17,7 @@ var (
 	codescanPath   string
 	codescanFormat string
 	codescanOutput string
+	codescanConfig string
 )
 
 var codescanCmd = &cobra.Command{
@@ -49,7 +50,15 @@ Checks for:
 func init() {
 	codescanCmd.Flags().StringVar(&codescanFormat, "format", "terminal", "output format: terminal, json")
 	codescanCmd.Flags().StringVar(&codescanOutput, "output", "", "write report to file (stdout if omitted)")
+	codescanCmd.Flags().StringVar(&codescanConfig, "config", "", "path to a .greenlight.yml (default: auto-detected in the scanned project)")
 	rootCmd.AddCommand(codescanCmd)
+}
+
+func loadCodescanConfig(path string) (*codescan.Config, error) {
+	if codescanConfig != "" {
+		return codescan.LoadConfigFile(codescanConfig)
+	}
+	return codescan.LoadConfig(path)
 }
 
 func runCodescan(cmd *cobra.Command, args []string) error {
@@ -74,7 +83,11 @@ func runCodescan(cmd *cobra.Command, args []string) error {
 
 	// Run scan
 	start := time.Now()
-	scanner := codescan.NewScanner(path, verbose)
+	cfg, err := loadCodescanConfig(path)
+	if err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	scanner := codescan.NewScannerWithConfig(path, verbose, cfg)
 	findings, err := scanner.Scan()
 	if err != nil {
 		return fmt.Errorf("scan failed: %w", err)
