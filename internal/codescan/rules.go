@@ -249,6 +249,20 @@ func AllRules() []Rule {
 			},
 		},
 		&PatternRule{
+			id:        "uiwebview-removed",
+			title:     "UIWebView is no longer accepted",
+			guideline: "2.5.1",
+			severity:  SeverityCritical,
+			detail:    "Apple stopped accepting apps and updates that use the deprecated UIWebView API. Its presence is a hard rejection.",
+			fix:       "Migrate to WKWebView.",
+			languages: []string{"swift", "objc"},
+			patterns: []*regexp.Regexp{
+				// Prefix match so UIWebViewDelegate etc. are caught; the word
+				// boundary avoids custom names like MyUIWebView.
+				regexp.MustCompile(`\bUIWebView`),
+			},
+		},
+		&PatternRule{
 			id:        "vague-purpose-string",
 			title:     "Vague permission purpose string",
 			guideline: "5.1.1",
@@ -269,6 +283,9 @@ func AllRules() []Rule {
 		},
 		&ExpoConfigRule{
 			id: "expo-config-check",
+		},
+		&ExportComplianceRule{
+			id: "export-compliance",
 		},
 	}
 }
@@ -472,4 +489,45 @@ func (r *ExpoConfigRule) Check(fc FileContext) []Finding {
 	}
 
 	return findings
+}
+
+// ExportComplianceRule flags an Info.plist or Expo config that does not declare
+// encryption export compliance. Without it, App Store Connect prompts for export
+// compliance on every single upload.
+type ExportComplianceRule struct {
+	id string
+}
+
+func (r *ExportComplianceRule) Applies(fc FileContext) bool {
+	if fc.Language == "plist" && strings.HasSuffix(strings.ToLower(fc.RelPath), "info.plist") {
+		return true
+	}
+	// Match the Expo config files by exact name, not a trimmed basename — source
+	// like App.tsx / app.js also collapses to "app" and would false-positive.
+	switch strings.ToLower(filepath.Base(fc.RelPath)) {
+	case "app.json", "app.config.js", "app.config.ts":
+		return true
+	}
+	return false
+}
+
+func (r *ExportComplianceRule) Check(fc FileContext) []Finding {
+	content := strings.Join(fc.Lines, "\n")
+	// Already declared — Info.plist uses ITSAppUsesNonExemptEncryption; Expo
+	// app.json uses ios.config.usesNonExemptEncryption.
+	if strings.Contains(content, "ITSAppUsesNonExemptEncryption") ||
+		strings.Contains(content, "usesNonExemptEncryption") {
+		return nil
+	}
+	// For Expo configs, only flag a file that actually defines an app.
+	if fc.Language != "plist" && !strings.Contains(content, `"expo"`) {
+		return nil
+	}
+	return []Finding{{
+		Severity: SeverityInfo,
+		Title:    "No encryption export-compliance declaration",
+		Detail:   "Without an export-compliance declaration, App Store Connect asks about export compliance on every upload.",
+		Fix:      "Set ITSAppUsesNonExemptEncryption in Info.plist (or ios.config.usesNonExemptEncryption in app.json): false if you only use exempt encryption like HTTPS, true (with documentation) otherwise.",
+		File:     fc.RelPath,
+	}}
 }
