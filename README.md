@@ -169,7 +169,18 @@ All scan commands support:
 ```bash
 --format terminal   # colored terminal output (default)
 --format json       # JSON for CI/CD pipelines
+--format sarif      # SARIF 2.1.0 for GitHub code scanning (preflight, codescan)
 --output file.json  # write to file instead of stdout
+```
+
+Upload `--format sarif` to GitHub code scanning to get findings inline in the
+Security tab and on PRs:
+
+```yaml
+- run: greenlight preflight . --format sarif --output greenlight.sarif
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: greenlight.sarif
 ```
 
 ## Claude Code Skill

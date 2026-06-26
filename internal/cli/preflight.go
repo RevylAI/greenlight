@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/RevylAI/greenlight/internal/preflight"
+	"github.com/RevylAI/greenlight/internal/sarif"
 	"github.com/RevylAI/greenlight/internal/verify"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
@@ -56,7 +57,7 @@ Usage:
 
 func init() {
 	preflightCmd.Flags().StringVar(&preflightIPA, "ipa", "", "path to .ipa file for binary inspection")
-	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json")
+	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json, sarif")
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
 	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a cloud device via Revyl")
 	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
@@ -90,7 +91,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	}
 
 	// Banner (suppressed for --format json so stdout stays valid JSON).
-	if strings.ToLower(preflightFormat) != "json" {
+	if f := strings.ToLower(preflightFormat); f != "json" && f != "sarif" {
 		purple.Println("\n  greenlight preflight — every check, one command, zero uploads.")
 		fmt.Printf("  Project: %s\n", path)
 		if preflightIPA != "" {
@@ -123,13 +124,25 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		output = os.Stdout
 	}
 
-	isJSON := strings.ToLower(preflightFormat) == "json"
+	format := strings.ToLower(preflightFormat)
+	isJSON := format == "json"
+	isSARIF := format == "sarif"
+
+	// SARIF represents static code findings; runtime flow results aren't code
+	// locations. Reject the combination up front so we don't run (and bill) a
+	// device flow whose result the SARIF output would silently drop.
+	if isSARIF && preflightVerify {
+		return fmt.Errorf("--format sarif carries static findings only and can't represent --verify runtime results; use --format json for combined output, or run 'greenlight verify' separately")
+	}
 
 	// Default path: static only — offline, zero-account, instant, and complete
 	// on its own. The runtime tier is strictly opt-in; we only leave a light tip.
 	if !preflightVerify {
 		if isJSON {
 			return writePreflightJSON(output, result)
+		}
+		if isSARIF {
+			return writePreflightSARIF(output, result)
 		}
 		if err := writePreflightTerminal(output, result); err != nil {
 			return err
@@ -405,6 +418,21 @@ func writePreflightJSON(w *os.File, result *preflight.Result) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(preflightJSONObject(result))
+}
+
+func writePreflightSARIF(w *os.File, result *preflight.Result) error {
+	sf := make([]sarif.Finding, 0, len(result.Findings))
+	for _, f := range result.Findings {
+		sf = append(sf, sarif.Finding{
+			Severity:  f.Severity,
+			Title:     f.Title,
+			Detail:    f.Detail,
+			Guideline: f.Guideline,
+			File:      f.File,
+			Line:      f.Line,
+		})
+	}
+	return sarif.Write(w, "greenlight", appVersion, greenlightInfoURI, sf)
 }
 
 // writeCombinedJSON emits the static result and the runtime (Revyl) result
