@@ -385,6 +385,12 @@ func suppressedByIgnore(lines []string, lineNum int, ruleID string) bool {
 	return lineNum > 0 && directiveSuppresses(lines[lineNum-1], ruleID)
 }
 
+// directiveSuppresses reports whether line carries a directive suppressing
+// ruleID. The marker is matched as a plain substring (no comment/string parsing).
+// A directive with no trailing tokens is "bare" and suppresses every rule;
+// otherwise each whitespace/comma-separated token is matched against ruleID, so
+// `greenlight:ignore <id> <reason>` works but `greenlight:ignore <reason>` (no
+// id) does NOT blanket-suppress — use a bare directive for that.
 func directiveSuppresses(line, ruleID string) bool {
 	const marker = "greenlight:ignore"
 	i := strings.Index(line, marker)

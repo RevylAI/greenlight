@@ -43,6 +43,8 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	// Match the `version` subcommand's wording ("greenlight <v>") for `--version`.
+	rootCmd.SetVersionTemplate("greenlight {{.Version}}\n")
 
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(authCmd)
