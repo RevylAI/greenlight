@@ -42,6 +42,25 @@ func TestInlineIgnoreDirective(t *testing.T) {
 	if got := r.Check(swiftCtx(`let host = "10.1.2.3"`)); len(got) == 0 {
 		t.Error("expected a finding when no ignore directive is present")
 	}
+
+	// A TRAILING directive on a code line must suppress only its own line, not a
+	// real finding on the line below.
+	leak := swiftCtx(
+		`let a = "10.1.2.3" // greenlight:ignore hardcoded-ipv4`,
+		`let b = "192.168.5.5"`,
+	)
+	if got := r.Check(leak); len(got) != 1 {
+		t.Errorf("trailing directive must not leak to the next line; want 1 finding, got %d: %+v", len(got), got)
+	}
+
+	// A prose comment that merely mentions the marker is not a directive.
+	prose := swiftCtx(
+		`// To silence this, add greenlight:ignore`,
+		`let host = "10.1.2.3"`,
+	)
+	if got := r.Check(prose); len(got) != 1 {
+		t.Errorf("prose mentioning the marker must not suppress; want 1 finding, got %d: %+v", len(got), got)
+	}
 }
 
 // The §2.1 placeholder-content rule must not fire on SwiftUI's `placeholder:`
