@@ -164,6 +164,17 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 			Detail:    "The IPA contains neither AppIcon assets nor a compiled asset catalog (Assets.car).",
 			Fix:       "Add a 1024x1024 app icon to your asset catalog.",
 		})
+	case !hasAppIcon && hasAssetCatalog:
+		// Icons ship inside the compiled catalog; we can't open Assets.car to
+		// confirm an AppIcon set actually exists, so surface it instead of going
+		// silent (Apple still rejects an app with no AppIcon under §2.3).
+		result.Findings = append(result.Findings, Finding{
+			Severity:  "INFO",
+			Guideline: "2.3",
+			Title:     "App icon could not be verified (compiled into Assets.car)",
+			Detail:    "Icons appear to ship inside the asset catalog; greenlight can't decode Assets.car to confirm a complete AppIcon set.",
+			Fix:       "Confirm your asset catalog has an AppIcon set with a 1024x1024 marketing icon.",
+		})
 	case hasAppIcon && !hasAssetCatalog && iconCount < 2:
 		// Only meaningful when icons ship as loose PNGs; a compiled catalog hides
 		// the per-size files, so we can't (and shouldn't) count them.

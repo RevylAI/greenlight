@@ -101,7 +101,11 @@ func TestInspectParsesBinaryPlist(t *testing.T) {
 		t.Errorf("false missing-version finding on a binary plist: %v", titles(res))
 	}
 	if hasFinding(res, "No app icon") {
-		t.Errorf("false 'No app icon' with Assets.car present: %v", titles(res))
+		t.Errorf("false 'No app icon' CRITICAL with Assets.car present: %v", titles(res))
+	}
+	// ...but it isn't silent either: an unverifiable compiled catalog gets an INFO.
+	if !hasFinding(res, "could not be verified") {
+		t.Errorf("expected the Assets.car icon INFO; got %v", titles(res))
 	}
 	if hasFinding(res, "No launch storyboard") {
 		t.Errorf("false launch-storyboard finding: %v", titles(res))
