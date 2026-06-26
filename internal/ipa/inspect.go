@@ -3,11 +3,16 @@ package ipa
 import (
 	"archive/zip"
 	"fmt"
+	"io"
 	"os"
-	"path/filepath"
-	"regexp"
 	"strings"
+
+	"howett.net/plist"
 )
+
+// maxPlistBytes caps how much we read from a single zip entry, so a crafted IPA
+// with a huge declared UncompressedSize64 can't exhaust memory.
+const maxPlistBytes = 16 << 20 // 16 MiB — orders of magnitude above any real plist
 
 // Finding from IPA inspection.
 type Finding struct {
@@ -47,15 +52,15 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 
 	// Build an index of all files in the IPA
 	var (
-		appDir         string
-		files          = make(map[string]*zip.File)
-		hasInfoPlist   bool
-		hasPrivacyInfo bool
-		hasLaunchSB    bool
-		hasAppIcon     bool
-		iconCount      int
-		frameworkDirs  = make(map[string]bool)
-		archsFound     = make(map[string]bool)
+		appDir          string
+		files           = make(map[string]*zip.File)
+		hasInfoPlist    bool
+		hasPrivacyInfo  bool
+		hasLaunchSB     bool
+		hasAppIcon      bool
+		hasAssetCatalog bool
+		iconCount       int
+		frameworkDirs   = make(map[string]bool)
 	)
 
 	for _, f := range r.File {
@@ -93,6 +98,10 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 			hasInfoPlist = true
 		case rel == "PrivacyInfo.xcprivacy":
 			hasPrivacyInfo = true
+		case rel == "Assets.car":
+			// Modern apps compile their icons into the asset catalog rather than
+			// shipping loose AppIcon*.png files.
+			hasAssetCatalog = true
 		case strings.Contains(rel, "LaunchScreen") || strings.Contains(rel, "LaunchStoryboard"):
 			hasLaunchSB = true
 		case strings.HasPrefix(rel, "AppIcon") || strings.Contains(rel, "AppIcon"):
@@ -103,11 +112,6 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 		case strings.Contains(rel, ".framework/"):
 			parts := strings.SplitN(rel, ".framework/", 2)
 			frameworkDirs[parts[0]+".framework"] = true
-		}
-
-		// Check for executable to detect architectures
-		if rel == result.AppName {
-			archsFound["binary"] = true
 		}
 	}
 
@@ -123,7 +127,6 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 			Fix:       "This indicates a broken build. Rebuild your app.",
 		})
 	} else {
-		// Parse Info.plist and check contents
 		result.checkInfoPlist(files, appDir)
 	}
 
@@ -151,16 +154,19 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 		})
 	}
 
-	// 4. App icon
-	if !hasAppIcon {
+	// 4. App icon. Loose AppIcon*.png OR a compiled Assets.car both count.
+	switch {
+	case !hasAppIcon && !hasAssetCatalog:
 		result.Findings = append(result.Findings, Finding{
 			Severity:  "CRITICAL",
 			Guideline: "2.3",
 			Title:     "No app icon found in bundle",
-			Detail:    "The IPA does not contain any AppIcon assets.",
+			Detail:    "The IPA contains neither AppIcon assets nor a compiled asset catalog (Assets.car).",
 			Fix:       "Add a 1024x1024 app icon to your asset catalog.",
 		})
-	} else if iconCount < 2 {
+	case hasAppIcon && !hasAssetCatalog && iconCount < 2:
+		// Only meaningful when icons ship as loose PNGs; a compiled catalog hides
+		// the per-size files, so we can't (and shouldn't) count them.
 		result.Findings = append(result.Findings, Finding{
 			Severity:  "WARN",
 			Guideline: "2.3",
@@ -170,174 +176,179 @@ func Inspect(ipaPath string) (*InspectResult, error) {
 		})
 	}
 
-	// 5. App size
+	// 5. App size. Note: this is the compressed IPA (the delivery artifact), not
+	// the App Store-thinned per-device download, so treat it as an upper bound.
 	sizeMB := float64(result.Size) / (1024 * 1024)
 	if sizeMB > 200 {
 		result.Findings = append(result.Findings, Finding{
 			Severity:  "WARN",
 			Guideline: "2.4",
-			Title:     fmt.Sprintf("App size is %.0fMB — exceeds cellular download limit", sizeMB),
-			Detail:    "Apps over 200MB cannot be downloaded over cellular data without user confirmation.",
-			Fix:       "Consider using On Demand Resources, app thinning, or reducing asset sizes.",
+			Title:     fmt.Sprintf("IPA size is %.0fMB — may exceed the cellular download limit", sizeMB),
+			Detail:    "Apps over 200MB cannot be downloaded over cellular without user confirmation. The thinned per-device size is usually smaller than the IPA.",
+			Fix:       "Consider On Demand Resources, app thinning, or reducing asset sizes.",
 		})
 	} else if sizeMB > 150 {
 		result.Findings = append(result.Findings, Finding{
 			Severity: "INFO",
-			Title:    fmt.Sprintf("App size is %.0fMB — approaching cellular limit", sizeMB),
+			Title:    fmt.Sprintf("IPA size is %.0fMB — approaching the cellular limit", sizeMB),
 			Detail:   "The 200MB cellular download limit may impact conversion rates.",
 		})
 	}
 
-	// 6. Check embedded frameworks for their own privacy manifests
+	// 6. Embedded frameworks should ship their own privacy manifests.
 	for fw := range frameworkDirs {
-		fwPrivacy := appDir + "Frameworks/" + fw + "/PrivacyInfo.xcprivacy"
-		if _, ok := files[fwPrivacy]; !ok {
-			// Also check without Frameworks/ prefix
-			fwPrivacy2 := appDir + fw + "/PrivacyInfo.xcprivacy"
-			if _, ok := files[fwPrivacy2]; !ok {
-				result.Findings = append(result.Findings, Finding{
-					Severity:  "WARN",
-					Guideline: "5.1.1",
-					Title:     fmt.Sprintf("Framework '%s' missing privacy manifest", filepath.Base(fw)),
-					Detail:    "Third-party frameworks must include their own PrivacyInfo.xcprivacy.",
-					Fix:       "Update the framework to a version that includes a privacy manifest, or contact the vendor.",
-				})
-			}
+		// fw is the bundle path relative to the app (e.g. "Frameworks/Foo.framework").
+		if _, ok := files[appDir+fw+"/PrivacyInfo.xcprivacy"]; !ok {
+			result.Findings = append(result.Findings, Finding{
+				Severity:  "WARN",
+				Guideline: "5.1.1",
+				Title:     fmt.Sprintf("Framework '%s' missing privacy manifest", baseName(fw)),
+				Detail:    "Third-party frameworks must include their own PrivacyInfo.xcprivacy.",
+				Fix:       "Update the framework to a version that includes a privacy manifest, or contact the vendor.",
+			})
 		}
 	}
 
 	return result, nil
 }
 
-func (r *InspectResult) checkInfoPlist(files map[string]*zip.File, appDir string) {
-	f, ok := files[appDir+"Info.plist"]
+// parsePlist reads and decodes a plist zip entry. plist.Unmarshal auto-detects
+// binary (bplist00) vs XML, so production binary plists parse correctly — the
+// previous string-matching approach silently failed on them.
+func parsePlist(files map[string]*zip.File, name string) (map[string]interface{}, error) {
+	f, ok := files[name]
 	if !ok {
-		return
+		return nil, os.ErrNotExist
 	}
-
 	rc, err := f.Open()
 	if err != nil {
-		return
+		return nil, err
 	}
 	defer rc.Close()
 
-	// Read as bytes — Info.plist can be binary or XML
-	buf := make([]byte, f.UncompressedSize64)
-	rc.Read(buf)
-	content := string(buf)
-
-	// Check for required keys (works for XML plists; binary plists will have partial matches)
-	requiredKeys := map[string]struct {
-		guideline string
-		title     string
-	}{
-		"CFBundleDisplayName":   {"2.3", "Missing CFBundleDisplayName"},
-		"CFBundleVersion":      {"2.1", "Missing CFBundleVersion (build number)"},
-		"CFBundleShortVersionString": {"2.1", "Missing CFBundleShortVersionString (version)"},
+	data, err := io.ReadAll(io.LimitReader(rc, maxPlistBytes))
+	if err != nil {
+		return nil, err
 	}
 
-	for key, info := range requiredKeys {
-		if !strings.Contains(content, key) {
+	var raw interface{}
+	if _, err := plist.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	m, ok := raw.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("plist root is not a dictionary")
+	}
+	return m, nil
+}
+
+func (r *InspectResult) checkInfoPlist(files map[string]*zip.File, appDir string) {
+	m, err := parsePlist(files, appDir+"Info.plist")
+	if err != nil {
+		r.Findings = append(r.Findings, Finding{
+			Severity: "INFO",
+			Title:    "Could not parse Info.plist",
+			Detail:   fmt.Sprintf("Info.plist is present but could not be decoded (%v); skipping its checks.", err),
+		})
+		return
+	}
+
+	if s := stringValue(m, "CFBundleIdentifier"); s != "" {
+		r.BundleID = s
+	}
+
+	// Build/version numbers are required.
+	for _, rk := range []struct{ key, guideline, title string }{
+		{"CFBundleVersion", "2.1", "Missing CFBundleVersion (build number)"},
+		{"CFBundleShortVersionString", "2.1", "Missing CFBundleShortVersionString (version)"},
+	} {
+		if stringValue(m, rk.key) == "" {
 			r.Findings = append(r.Findings, Finding{
 				Severity:  "WARN",
-				Guideline: info.guideline,
-				Title:     info.title,
-				Detail:    fmt.Sprintf("Info.plist should contain %s.", key),
-				Fix:       "Add the missing key to your Info.plist.",
+				Guideline: rk.guideline,
+				Title:     rk.title,
+				Detail:    fmt.Sprintf("Info.plist should contain a non-empty %s.", rk.key),
+				Fix:       "Set the missing key in your build settings / Info.plist.",
 			})
 		}
 	}
 
-	// Check for NSAppTransportSecurity exceptions
-	if strings.Contains(content, "NSAllowsArbitraryLoads") {
-		if strings.Contains(content, "<true/>") {
+	// A display name is good practice; only flag when neither it nor CFBundleName
+	// is set (CFBundleName is the fallback Apple uses).
+	if stringValue(m, "CFBundleDisplayName") == "" && stringValue(m, "CFBundleName") == "" {
+		r.Findings = append(r.Findings, Finding{
+			Severity:  "WARN",
+			Guideline: "2.3",
+			Title:     "Missing CFBundleDisplayName / CFBundleName",
+			Detail:    "The app has no display name set.",
+			Fix:       "Set CFBundleDisplayName (or at least CFBundleName) in your Info.plist.",
+		})
+	}
+
+	// App Transport Security: a global arbitrary-loads exception needs justification.
+	if ats, ok := m["NSAppTransportSecurity"].(map[string]interface{}); ok {
+		if allow, _ := ats["NSAllowsArbitraryLoads"].(bool); allow {
 			r.Findings = append(r.Findings, Finding{
 				Severity:  "WARN",
 				Guideline: "1.6",
 				Title:     "App Transport Security disabled (NSAllowsArbitraryLoads = true)",
-				Detail:    "Disabling ATS allows insecure HTTP connections. Apple may require justification.",
-				Fix:       "Use HTTPS for all connections instead of disabling ATS globally. Use per-domain exceptions if needed.",
+				Detail:    "Disabling ATS globally allows insecure HTTP connections. Apple may require justification.",
+				Fix:       "Use HTTPS everywhere, or scope exceptions per-domain via NSExceptionDomains instead of a global override.",
 			})
 		}
 	}
 
-	// Check for purpose strings (they should exist if capabilities are used)
-	purposeStrings := []struct {
-		key  string
-		name string
-	}{
-		{"NSCameraUsageDescription", "Camera"},
-		{"NSMicrophoneUsageDescription", "Microphone"},
-		{"NSPhotoLibraryUsageDescription", "Photo Library"},
-		{"NSLocationWhenInUseUsageDescription", "Location (When In Use)"},
-		{"NSLocationAlwaysUsageDescription", "Location (Always)"},
-		{"NSBluetoothAlwaysUsageDescription", "Bluetooth"},
-		{"NSMotionUsageDescription", "Motion"},
-		{"NSFaceIDUsageDescription", "Face ID"},
-		{"NSUserTrackingUsageDescription", "User Tracking (ATT)"},
-		{"NSHealthShareUsageDescription", "HealthKit"},
-		{"NSContactsUsageDescription", "Contacts"},
-		{"NSCalendarsUsageDescription", "Calendars"},
-		{"NSRemindersUsageDescription", "Reminders"},
-		{"NSSpeechRecognitionUsageDescription", "Speech Recognition"},
-	}
-
-	// Check for empty purpose strings
+	// Purpose strings: present-but-empty is a hard rejection; very short is vague.
 	for _, ps := range purposeStrings {
-		if strings.Contains(content, ps.key) {
-			// Check for empty or very short value
-			emptyPattern := regexp.MustCompile(ps.key + `</key>\s*<string>\s*</string>`)
-			shortPattern := regexp.MustCompile(ps.key + `</key>\s*<string>.{1,15}</string>`)
-			if emptyPattern.Match(buf) {
-				r.Findings = append(r.Findings, Finding{
-					Severity:  "CRITICAL",
-					Guideline: "5.1.1",
-					Title:     fmt.Sprintf("%s purpose string is empty", ps.name),
-					Detail:    fmt.Sprintf("%s is declared but has no description.", ps.key),
-					Fix:       fmt.Sprintf("Add a specific, user-facing description for why your app needs %s access.", ps.name),
-				})
-			} else if shortPattern.Match(buf) {
-				r.Findings = append(r.Findings, Finding{
-					Severity:  "WARN",
-					Guideline: "5.1.1",
-					Title:     fmt.Sprintf("%s purpose string may be too vague", ps.name),
-					Detail:    fmt.Sprintf("%s has a very short description. Apple rejects vague purpose strings.", ps.key),
-					Fix:       "Write a specific description: 'Take photos to attach to support tickets' NOT 'Camera access needed'.",
-				})
-			}
+		v, present := m[ps.key]
+		if !present {
+			continue
+		}
+		s, _ := v.(string)
+		switch n := len([]rune(strings.TrimSpace(s))); {
+		case n == 0:
+			r.Findings = append(r.Findings, Finding{
+				Severity:  "CRITICAL",
+				Guideline: "5.1.1",
+				Title:     fmt.Sprintf("%s purpose string is empty", ps.name),
+				Detail:    fmt.Sprintf("%s is declared but has no description.", ps.key),
+				Fix:       fmt.Sprintf("Add a specific, user-facing description for why your app needs %s access.", ps.name),
+			})
+		case n < 15:
+			r.Findings = append(r.Findings, Finding{
+				Severity:  "WARN",
+				Guideline: "5.1.1",
+				Title:     fmt.Sprintf("%s purpose string may be too vague", ps.name),
+				Detail:    fmt.Sprintf("%s has a very short description. Apple rejects vague purpose strings.", ps.key),
+				Fix:       "Write a specific description: 'Take photos to attach to support tickets' NOT 'Camera access needed'.",
+			})
 		}
 	}
 }
 
 func (r *InspectResult) checkPrivacyManifest(files map[string]*zip.File, appDir string) {
-	f, ok := files[appDir+"PrivacyInfo.xcprivacy"]
-	if !ok {
-		return
-	}
-
-	rc, err := f.Open()
+	m, err := parsePlist(files, appDir+"PrivacyInfo.xcprivacy")
 	if err != nil {
+		r.Findings = append(r.Findings, Finding{
+			Severity: "INFO",
+			Title:    "Could not parse PrivacyInfo.xcprivacy",
+			Detail:   fmt.Sprintf("The privacy manifest is present but could not be decoded (%v); skipping its checks.", err),
+		})
 		return
 	}
-	defer rc.Close()
 
-	buf := make([]byte, f.UncompressedSize64)
-	rc.Read(buf)
-	content := string(buf)
-
-	// Check if it's basically empty
-	if len(strings.TrimSpace(content)) < 100 {
+	if len(m) == 0 {
 		r.Findings = append(r.Findings, Finding{
 			Severity:  "WARN",
 			Guideline: "5.1.1",
-			Title:     "PrivacyInfo.xcprivacy appears to be minimal/empty",
-			Detail:    "The privacy manifest exists but may not declare any API usage or tracking.",
+			Title:     "PrivacyInfo.xcprivacy is empty",
+			Detail:    "The privacy manifest exists but declares nothing.",
 			Fix:       "Populate the privacy manifest with your app's actual API usage and tracking declarations.",
 		})
+		return
 	}
 
-	// Check for NSPrivacyTracking declaration
-	if !strings.Contains(content, "NSPrivacyTracking") {
+	if _, ok := m["NSPrivacyTracking"]; !ok {
 		r.Findings = append(r.Findings, Finding{
 			Severity:  "WARN",
 			Guideline: "5.1.2",
@@ -347,8 +358,7 @@ func (r *InspectResult) checkPrivacyManifest(files map[string]*zip.File, appDir 
 		})
 	}
 
-	// Check for NSPrivacyAccessedAPITypes
-	if !strings.Contains(content, "NSPrivacyAccessedAPITypes") {
+	if _, ok := m["NSPrivacyAccessedAPITypes"]; !ok {
 		r.Findings = append(r.Findings, Finding{
 			Severity:  "WARN",
 			Guideline: "5.1.1",
@@ -358,8 +368,7 @@ func (r *InspectResult) checkPrivacyManifest(files map[string]*zip.File, appDir 
 		})
 	}
 
-	// Check for NSPrivacyCollectedDataTypes
-	if !strings.Contains(content, "NSPrivacyCollectedDataTypes") {
+	if _, ok := m["NSPrivacyCollectedDataTypes"]; !ok {
 		r.Findings = append(r.Findings, Finding{
 			Severity:  "INFO",
 			Guideline: "5.1.1",
@@ -368,4 +377,40 @@ func (r *InspectResult) checkPrivacyManifest(files map[string]*zip.File, appDir 
 			Fix:       "Declare collected data types to match your App Store privacy nutrition labels.",
 		})
 	}
+}
+
+// purposeStrings are the Info.plist usage-description keys whose values Apple
+// reviews for clarity.
+var purposeStrings = []struct {
+	key  string
+	name string
+}{
+	{"NSCameraUsageDescription", "Camera"},
+	{"NSMicrophoneUsageDescription", "Microphone"},
+	{"NSPhotoLibraryUsageDescription", "Photo Library"},
+	{"NSLocationWhenInUseUsageDescription", "Location (When In Use)"},
+	{"NSLocationAlwaysUsageDescription", "Location (Always)"},
+	{"NSBluetoothAlwaysUsageDescription", "Bluetooth"},
+	{"NSMotionUsageDescription", "Motion"},
+	{"NSFaceIDUsageDescription", "Face ID"},
+	{"NSUserTrackingUsageDescription", "User Tracking (ATT)"},
+	{"NSHealthShareUsageDescription", "HealthKit"},
+	{"NSContactsUsageDescription", "Contacts"},
+	{"NSCalendarsUsageDescription", "Calendars"},
+	{"NSRemindersUsageDescription", "Reminders"},
+	{"NSSpeechRecognitionUsageDescription", "Speech Recognition"},
+}
+
+// stringValue returns m[key] as a trimmed string, or "" if absent / not a string.
+func stringValue(m map[string]interface{}, key string) string {
+	s, _ := m[key].(string)
+	return strings.TrimSpace(s)
+}
+
+// baseName returns the last path element of a slash-separated bundle path.
+func baseName(p string) string {
+	if i := strings.LastIndex(p, "/"); i >= 0 {
+		return p[i+1:]
+	}
+	return p
 }
