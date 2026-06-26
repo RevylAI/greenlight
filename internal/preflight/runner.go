@@ -42,6 +42,7 @@ type Result struct {
 type Summary struct {
 	Total    int  `json:"total"`
 	Critical int  `json:"critical"`
+	High     int  `json:"high"`
 	Warns    int  `json:"warns"`
 	Infos    int  `json:"infos"`
 	Passed   bool `json:"passed"` // true if zero CRITICALs
@@ -196,12 +197,16 @@ func computeSummary(findings []Finding) Summary {
 		switch f.Severity {
 		case "CRITICAL":
 			s.Critical++
+		case "HIGH":
+			s.High++
 		case "WARN":
 			s.Warns++
 		case "INFO":
 			s.Infos++
 		}
 	}
+	// Passed stays "no criticals" for backward compatibility; High findings are
+	// surfaced separately and drive the NEEDS REVIEW headline / --exit-code.
 	s.Passed = s.Critical == 0
 	return s
 }
@@ -211,7 +216,7 @@ func dedup(findings []Finding) []Finding {
 	seen := make(map[string]int) // title -> index in result
 	var result []Finding
 
-	sevRank := map[string]int{"CRITICAL": 3, "WARN": 2, "INFO": 1}
+	sevRank := map[string]int{"CRITICAL": 4, "HIGH": 3, "WARN": 2, "INFO": 1}
 
 	for _, f := range findings {
 		if idx, ok := seen[f.Title]; ok {

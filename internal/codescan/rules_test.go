@@ -64,6 +64,47 @@ func TestPlatformReferenceIgnoresCodeConstructs(t *testing.T) {
 	}
 }
 
+// The flow-dependent guidelines static analysis can only weakly assert (missing
+// account deletion, Sign in with Apple, restore purchases, ATT) are HIGH — likely
+// rejections — not WARN. Mislabeling them WARN let apps that Apple rejects still
+// read as GREENLIT; this test pins them at HIGH.
+func TestHardRejectionRulesAreHigh(t *testing.T) {
+	for _, id := range []string{"missing-att", "social-login-no-apple", "iap-no-restore", "account-no-delete"} {
+		if r := ruleByID(t, id); r.severity != SeverityHigh {
+			t.Errorf("rule %q: severity = %v, want HIGH", id, r.severity)
+		}
+	}
+}
+
+// A HIGH finding is tallied separately so the headline can show NEEDS REVIEW,
+// but Passed stays "no criticals" for backward compatibility.
+func TestComputeSummaryHigh(t *testing.T) {
+	s := ComputeSummary([]Finding{
+		{Severity: SeverityHigh},
+		{Severity: SeverityHigh},
+		{Severity: SeverityWarn},
+		{Severity: SeverityInfo},
+	}, 0)
+	if s.High != 2 || s.Warns != 1 || s.Infos != 1 || s.Critical != 0 {
+		t.Errorf("unexpected counts: %+v", s)
+	}
+	if !s.Passed {
+		t.Error("Passed should stay true with no criticals (High is surfaced separately)")
+	}
+}
+
+// Severity serializes as its name, so inserting a tier never shifts the wire
+// value for JSON consumers reading codescan output.
+func TestSeverityMarshalsAsName(t *testing.T) {
+	b, err := SeverityHigh.MarshalJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(b) != `"HIGH"` {
+		t.Errorf("MarshalJSON = %s, want %q", b, `"HIGH"`)
+	}
+}
+
 // The §2.1 placeholder-content rule must not fire on SwiftUI's `placeholder:`
 // parameter or example hint text. It used to match the bare word "placeholder",
 // turning normal apps into dozens of warnings; re-adding it would fail this test.

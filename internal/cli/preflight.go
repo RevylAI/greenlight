@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	preflightIPA    string
-	preflightFormat string
-	preflightOutput string
+	preflightIPA      string
+	preflightFormat   string
+	preflightOutput   string
+	preflightExitCode bool
 
 	// Runtime tier (--verify): after the static checks, hand flow-dependent
 	// guidelines to Revyl to validate on a cloud device.
@@ -58,6 +59,7 @@ func init() {
 	preflightCmd.Flags().StringVar(&preflightIPA, "ipa", "", "path to .ipa file for binary inspection")
 	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json")
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
+	preflightCmd.Flags().BoolVar(&preflightExitCode, "exit-code", false, "exit non-zero on any CRITICAL or HIGH finding (or, with --verify, a failed flow) — for CI gating")
 	preflightCmd.Flags().BoolVar(&preflightVerify, "verify", false, "after static checks, validate flow-dependent guidelines on a cloud device via Revyl")
 	preflightCmd.Flags().StringVar(&preflightBuildName, "build-name", "", "Revyl build/app name (for --verify)")
 	preflightCmd.Flags().StringVar(&preflightArtifact, "artifact", "", "upload a prebuilt .app (iOS sim) or .apk (Android) to Revyl before --verify runs")
@@ -129,15 +131,18 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	// on its own. The runtime tier is strictly opt-in; we only leave a light tip.
 	if !preflightVerify {
 		if isJSON {
-			return writePreflightJSON(output, result)
+			if err := writePreflightJSON(output, result); err != nil {
+				return err
+			}
+		} else {
+			if err := writePreflightTerminal(output, result); err != nil {
+				return err
+			}
+			dim.Fprintln(output, "  Tip → 'greenlight preflight --verify' also runs your sign-in, purchase, and")
+			dim.Fprintln(output, "        account-deletion flows on a Revyl cloud device to confirm they work.")
+			fmt.Fprintln(output)
 		}
-		if err := writePreflightTerminal(output, result); err != nil {
-			return err
-		}
-		dim.Fprintln(output, "  Tip → 'greenlight preflight --verify' also runs your sign-in, purchase, and")
-		dim.Fprintln(output, "        account-deletion flows on a Revyl cloud device to confirm they work.")
-		fmt.Fprintln(output)
-		return nil
+		return preflightExit(result, nil)
 	}
 
 	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
@@ -167,7 +172,10 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	vres.Elapsed = time.Since(vstart)
 
 	if isJSON {
-		return writeCombinedJSON(output, result, vres)
+		if err := writeCombinedJSON(output, result, vres); err != nil {
+			return err
+		}
+		return preflightExit(result, vres)
 	}
 
 	if err := writePreflightTerminal(output, result); err != nil {
@@ -177,6 +185,24 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	purple.Fprintln(output, "  → Static checks done. Now validating the flows actually WORK, on a cloud device…")
 	fmt.Fprintln(output)
 	writeVerifyTerminal(output, vres)
+	return preflightExit(result, vres)
+}
+
+// preflightExit maps findings to a non-zero process exit when --exit-code is
+// set: any CRITICAL or HIGH static finding, or (when --verify ran) a failed or
+// errored runtime flow. It returns ErrThreshold, which main() turns into exit 1
+// without printing — the report itself is the user-facing output.
+func preflightExit(result *preflight.Result, vres *verify.Result) error {
+	if !preflightExitCode {
+		return nil
+	}
+	fail := result.Summary.Critical > 0 || result.Summary.High > 0
+	if vres != nil && !vres.Summary.Passed {
+		fail = true
+	}
+	if fail {
+		return ErrThreshold
+	}
 	return nil
 }
 
@@ -214,7 +240,7 @@ func writePreflightTerminal(w *os.File, result *preflight.Result) error {
 
 	// Sort: critical first, then warn, then info
 	sort.Slice(result.Findings, func(i, j int) bool {
-		sevRank := map[string]int{"CRITICAL": 3, "WARN": 2, "INFO": 1}
+		sevRank := map[string]int{"CRITICAL": 4, "HIGH": 3, "WARN": 2, "INFO": 1}
 		ri, rj := sevRank[result.Findings[i].Severity], sevRank[result.Findings[j].Severity]
 		if ri != rj {
 			return ri > rj
@@ -223,11 +249,13 @@ func writePreflightTerminal(w *os.File, result *preflight.Result) error {
 	})
 
 	// Group by severity
-	var criticals, warns, infos []preflight.Finding
+	var criticals, highs, warns, infos []preflight.Finding
 	for _, f := range result.Findings {
 		switch f.Severity {
 		case "CRITICAL":
 			criticals = append(criticals, f)
+		case "HIGH":
+			highs = append(highs, f)
 		case "WARN":
 			warns = append(warns, f)
 		case "INFO":
@@ -243,8 +271,16 @@ func writePreflightTerminal(w *os.File, result *preflight.Result) error {
 		}
 	}
 
+	if len(highs) > 0 {
+		color.New(color.FgHiYellow, color.Bold).Fprintln(w, "  HIGH — Likely rejection")
+		fmt.Fprintln(w)
+		for _, f := range highs {
+			printPreflightFinding(w, f)
+		}
+	}
+
 	if len(warns) > 0 {
-		yellow.Fprintln(w, "  WARNING — High rejection risk")
+		yellow.Fprintln(w, "  WARNING — Worth fixing")
 		fmt.Fprintln(w)
 		for _, f := range warns {
 			printPreflightFinding(w, f)
@@ -273,6 +309,8 @@ func printPreflightFinding(w *os.File, f preflight.Finding) {
 	switch f.Severity {
 	case "CRITICAL":
 		red.Fprintf(w, "  [CRITICAL] ")
+	case "HIGH":
+		color.New(color.FgHiYellow, color.Bold).Fprintf(w, "  [HIGH]     ")
 	case "WARN":
 		yellow.Fprintf(w, "  [WARN]     ")
 	case "INFO":
@@ -317,18 +355,23 @@ func printPreflightFinding(w *os.File, f preflight.Finding) {
 func printPreflightFooter(w *os.File, result *preflight.Result) {
 	red := color.New(color.FgRed, color.Bold)
 	green := color.New(color.FgGreen, color.Bold)
+	hiYellow := color.New(color.FgHiYellow, color.Bold)
 
 	s := result.Summary
 
 	dim.Fprintln(w, "  ─────────────────────────────────────────────")
 	fmt.Fprintln(w)
 
-	if s.Passed {
-		green.Fprint(w, "  GREENLIT")
-		fmt.Fprint(w, " — no critical issues found")
-	} else {
+	switch {
+	case s.Critical > 0:
 		red.Fprint(w, "  NOT READY")
 		fmt.Fprintf(w, " — %d critical issue(s) must be fixed", s.Critical)
+	case s.High > 0:
+		hiYellow.Fprint(w, "  NEEDS REVIEW")
+		fmt.Fprintf(w, " — %d high-risk issue(s) likely to be rejected", s.High)
+	default:
+		green.Fprint(w, "  GREENLIT")
+		fmt.Fprint(w, " — no critical issues found")
 	}
 	fmt.Fprintln(w)
 
@@ -336,6 +379,9 @@ func printPreflightFooter(w *os.File, result *preflight.Result) {
 		fmt.Fprintf(w, "  %d findings: ", s.Total)
 		if s.Critical > 0 {
 			red.Fprintf(w, "%d critical  ", s.Critical)
+		}
+		if s.High > 0 {
+			hiYellow.Fprintf(w, "%d high  ", s.High)
 		}
 		if s.Warns > 0 {
 			color.New(color.FgYellow).Fprintf(w, "%d warn  ", s.Warns)

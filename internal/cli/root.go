@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/fatih/color"
@@ -11,6 +12,11 @@ var (
 	appVersion string
 	verbose    bool
 )
+
+// ErrThreshold is returned by scan commands when --exit-code is set and the
+// findings cross the failure threshold. main() maps it to a non-zero exit status
+// without printing anything — the report is already the user-facing output.
+var ErrThreshold = errors.New("findings exceeded --exit-code threshold")
 
 var purple = color.New(color.FgHiMagenta)
 var dim = color.New(color.Faint)
@@ -40,6 +46,11 @@ func Execute() error {
 }
 
 func init() {
+	// Errors are printed by main() (so --exit-code's sentinel can exit quietly);
+	// usage on a runtime error is just noise.
+	rootCmd.SilenceErrors = true
+	rootCmd.SilenceUsage = true
+
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
 
 	rootCmd.AddCommand(scanCmd)

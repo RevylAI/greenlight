@@ -28,6 +28,7 @@ var (
 	verifyOutput      string
 	verifyRevylBin    string
 	verifyTimeout     int
+	verifyExitCode    bool
 )
 
 var verifyCmd = &cobra.Command{
@@ -71,6 +72,7 @@ func init() {
 	verifyCmd.Flags().StringVar(&verifyOutput, "output", "", "write report to file (stdout if omitted)")
 	verifyCmd.Flags().StringVar(&verifyRevylBin, "revyl", "", "path to the revyl binary (default: auto-detect)")
 	verifyCmd.Flags().IntVar(&verifyTimeout, "timeout", 0, "per-flow timeout in seconds (0 = revyl default)")
+	verifyCmd.Flags().BoolVar(&verifyExitCode, "exit-code", false, "exit non-zero if any flow failed or errored — for CI gating")
 	rootCmd.AddCommand(verifyCmd)
 }
 
@@ -157,9 +159,15 @@ func runVerify(cmd *cobra.Command, args []string) error {
 	}
 
 	if isJSON {
-		return writeVerifyJSON(out, result)
+		if err := writeVerifyJSON(out, result); err != nil {
+			return err
+		}
+	} else {
+		writeVerifyTerminal(out, result)
 	}
-	writeVerifyTerminal(out, result)
+	if verifyExitCode && !result.Summary.Passed {
+		return ErrThreshold
+	}
 	return nil
 }
 

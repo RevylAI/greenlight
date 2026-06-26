@@ -117,16 +117,18 @@ func writeCodescanTerminal(w *os.File, findings []codescan.Finding, elapsed time
 	if len(findings) == 0 {
 		green.Fprintln(w, "  No issues found!")
 		fmt.Fprintln(w)
-		printCodescanFooter(w, 0, 0, 0, elapsed)
+		printCodescanFooter(w, 0, 0, 0, 0, elapsed)
 		return nil
 	}
 
 	// Group by severity
-	var criticals, warns, infos []codescan.Finding
+	var criticals, highs, warns, infos []codescan.Finding
 	for _, f := range findings {
 		switch f.Severity {
 		case codescan.SeverityCritical:
 			criticals = append(criticals, f)
+		case codescan.SeverityHigh:
+			highs = append(highs, f)
 		case codescan.SeverityWarn:
 			warns = append(warns, f)
 		case codescan.SeverityInfo:
@@ -142,8 +144,16 @@ func writeCodescanTerminal(w *os.File, findings []codescan.Finding, elapsed time
 		}
 	}
 
+	if len(highs) > 0 {
+		color.New(color.FgHiYellow, color.Bold).Fprintln(w, "  HIGH — Likely rejection")
+		fmt.Fprintln(w)
+		for _, f := range highs {
+			printCodescanFinding(w, f)
+		}
+	}
+
 	if len(warns) > 0 {
-		yellow.Fprintln(w, "  WARNING — High rejection risk")
+		yellow.Fprintln(w, "  WARNING — Worth fixing")
 		fmt.Fprintln(w)
 		for _, f := range warns {
 			printCodescanFinding(w, f)
@@ -158,7 +168,7 @@ func writeCodescanTerminal(w *os.File, findings []codescan.Finding, elapsed time
 		}
 	}
 
-	printCodescanFooter(w, len(criticals), len(warns), len(infos), elapsed)
+	printCodescanFooter(w, len(criticals), len(highs), len(warns), len(infos), elapsed)
 	return nil
 }
 
@@ -172,6 +182,8 @@ func printCodescanFinding(w *os.File, f codescan.Finding) {
 	switch f.Severity {
 	case codescan.SeverityCritical:
 		red.Fprintf(w, "  [CRITICAL] ")
+	case codescan.SeverityHigh:
+		color.New(color.FgHiYellow, color.Bold).Fprintf(w, "  [HIGH]     ")
 	case codescan.SeverityWarn:
 		yellow.Fprintf(w, "  [WARN]     ")
 	case codescan.SeverityInfo:
@@ -210,22 +222,27 @@ func printCodescanFinding(w *os.File, f codescan.Finding) {
 	fmt.Fprintln(w)
 }
 
-func printCodescanFooter(w *os.File, criticals, warns, infos int, elapsed time.Duration) {
+func printCodescanFooter(w *os.File, criticals, highs, warns, infos int, elapsed time.Duration) {
 	red := color.New(color.FgRed, color.Bold)
 	green := color.New(color.FgGreen, color.Bold)
+	hiYellow := color.New(color.FgHiYellow, color.Bold)
 
-	total := criticals + warns + infos
+	total := criticals + highs + warns + infos
 
 	fmt.Fprintln(w)
 	dim.Fprintln(w, "  ─────────────────────────────────────────────")
 	fmt.Fprintln(w)
 
-	if criticals == 0 {
-		green.Fprint(w, "  GREENLIT")
-		fmt.Fprint(w, " — no critical issues found")
-	} else {
+	switch {
+	case criticals > 0:
 		red.Fprint(w, "  NOT READY")
 		fmt.Fprintf(w, " — %d critical issue(s) must be fixed", criticals)
+	case highs > 0:
+		hiYellow.Fprint(w, "  NEEDS REVIEW")
+		fmt.Fprintf(w, " — %d high-risk issue(s) likely to be rejected", highs)
+	default:
+		green.Fprint(w, "  GREENLIT")
+		fmt.Fprint(w, " — no critical issues found")
 	}
 	fmt.Fprintln(w)
 
@@ -233,6 +250,9 @@ func printCodescanFooter(w *os.File, criticals, warns, infos int, elapsed time.D
 		fmt.Fprintf(w, "  %d findings: ", total)
 		if criticals > 0 {
 			red.Fprintf(w, "%d critical  ", criticals)
+		}
+		if highs > 0 {
+			hiYellow.Fprintf(w, "%d high  ", highs)
 		}
 		if warns > 0 {
 			color.New(color.FgYellow).Fprintf(w, "%d warn  ", warns)
