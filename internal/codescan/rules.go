@@ -257,9 +257,12 @@ func AllRules() []Rule {
 			fix:       "Migrate to WKWebView.",
 			languages: []string{"swift", "objc"},
 			patterns: []*regexp.Regexp{
-				// Prefix match so UIWebViewDelegate etc. are caught; the word
-				// boundary avoids custom names like MyUIWebView.
-				regexp.MustCompile(`\bUIWebView`),
+				// Require a real usage context (call, ObjC pointer, type position,
+				// or the Delegate protocol) so a mention inside a string literal or
+				// a trailing comment doesn't trip this CRITICAL rule.
+				regexp.MustCompile(`\bUIWebView\s*[(*]`), // UIWebView(  /  UIWebView *
+				regexp.MustCompile(`\bUIWebViewDelegate\b`),
+				regexp.MustCompile(`[:\[]\s*UIWebView\b`), // : UIWebView  /  [UIWebView
 			},
 		},
 		&PatternRule{
@@ -491,6 +494,10 @@ func (r *ExpoConfigRule) Check(fc FileContext) []Finding {
 	return findings
 }
 
+// expoKeyRE matches the unquoted `expo:` key used in app.config.js / app.config.ts
+// (app.json uses the quoted "expo" form).
+var expoKeyRE = regexp.MustCompile(`\bexpo\s*:`)
+
 // ExportComplianceRule flags an Info.plist or Expo config that does not declare
 // encryption export compliance. Without it, App Store Connect prompts for export
 // compliance on every single upload.
@@ -519,8 +526,9 @@ func (r *ExportComplianceRule) Check(fc FileContext) []Finding {
 		strings.Contains(content, "usesNonExemptEncryption") {
 		return nil
 	}
-	// For Expo configs, only flag a file that actually defines an app.
-	if fc.Language != "plist" && !strings.Contains(content, `"expo"`) {
+	// For Expo configs, only flag a file that actually defines an app. app.json
+	// uses the quoted "expo" key; app.config.js/ts use an unquoted `expo:`.
+	if fc.Language != "plist" && !strings.Contains(content, `"expo"`) && !expoKeyRE.MatchString(content) {
 		return nil
 	}
 	return []Finding{{

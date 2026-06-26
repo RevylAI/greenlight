@@ -30,7 +30,15 @@ func TestUIWebViewRemoved(t *testing.T) {
 			t.Errorf("%q: severity = %v, want CRITICAL", line, got[0].Severity)
 		}
 	}
-	for _, line := range []string{`let w = WKWebView()`, `let x = MyUIWebView()`, `let y = MyUIWebViewWrapper()`} {
+	negatives := []string{
+		`let w = WKWebView()`,
+		`let x = MyUIWebView()`,
+		`let y = MyUIWebViewWrapper()`,
+		`let s = "UIWebView"`,                            // string literal, not usage
+		`logEvent("UIWebView_fallback_shown")`,           // identifier inside a string
+		`let w = WKWebView() // migrated from UIWebView`, // trailing-comment mention
+	}
+	for _, line := range negatives {
 		if got := r.Check(swiftCtx(line)); len(got) != 0 {
 			t.Errorf("did not expect a finding for %q, got %+v", line, got)
 		}
@@ -72,6 +80,16 @@ func TestExportCompliance(t *testing.T) {
 	expoNoKey := FileContext{RelPath: "app.json", Language: "json", Lines: []string{`{"expo":{"name":"X","ios":{"bundleIdentifier":"a.b"}}}`}}
 	if got := r.Check(expoNoKey); len(got) == 0 {
 		t.Error("expected a finding for an Expo app.json without usesNonExemptEncryption")
+	}
+
+	// app.config.js uses an unquoted `expo:` key — the rule must still fire (this
+	// was dead code: the "expo" quoted gate never matched JS/TS configs).
+	expoConfigJS := FileContext{RelPath: "app.config.js", Language: "javascript", Lines: []string{`export default { expo: { name: "X" } }`}}
+	if !r.Applies(expoConfigJS) {
+		t.Error("should apply to app.config.js")
+	}
+	if got := r.Check(expoConfigJS); len(got) == 0 {
+		t.Error("expected a finding for app.config.js without usesNonExemptEncryption")
 	}
 
 	expoWithKey := FileContext{RelPath: "app.json", Language: "json", Lines: []string{`{"expo":{"ios":{"config":{"usesNonExemptEncryption":false}}}}`}}
