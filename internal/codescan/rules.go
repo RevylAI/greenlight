@@ -178,7 +178,7 @@ func AllRules() []Rule {
 				// Code constructs that legitimately contain these keywords but are
 				// not user-facing copy: RN platform branches, imports/requires,
 				// package names, file paths, and build config.
-				regexp.MustCompile(`(?i)(Platform\.|import |require\(|from\s+['"]|@react-native|androidx|\.android\b|/android/|BuildConfig|\.gradle)`),
+				regexp.MustCompile(`(?i)(Platform\.|import |require\(|from\s+['"][\w@./-]+['"]|@react-native|androidx|\.android\b|/android/|BuildConfig|\.gradle)`),
 			},
 		},
 		&PatternRule{
@@ -226,7 +226,7 @@ func AllRules() []Rule {
 				regexp.MustCompile(`\b(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}\b`),
 			},
 			ignorePatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(version|build|sdk|revision|0\.0\.0|127\.0\.0\.1|localhost)`), // version/build strings and localhost
+				regexp.MustCompile(`(?i)(version|0\.0\.0|127\.0\.0\.1|localhost)`), // version strings and localhost (octet validation handles most others)
 			},
 		},
 		&PatternRule{

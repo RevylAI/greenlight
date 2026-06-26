@@ -36,9 +36,12 @@ func TestHardcodedIPv4IgnoresVersionStrings(t *testing.T) {
 		t.Errorf("expected no findings for version/invalid/loopback, got %d: %+v", len(got), got)
 	}
 
-	dirty := tsCtx(`const host = "192.168.1.42"`)
-	if got := r.Check(dirty); len(got) == 0 {
-		t.Errorf("expected a finding for a real hardcoded IPv4 address")
+	dirty := tsCtx(
+		`const host = "192.168.1.42"`,
+		`const sdkEndpoint = "172.16.0.4"`, // real IP in an sdk-named var must NOT be ignored
+	)
+	if got := r.Check(dirty); len(got) != 2 {
+		t.Errorf("expected 2 findings for real hardcoded IPv4 addresses, got %d: %+v", len(got), got)
 	}
 }
 
@@ -58,9 +61,12 @@ func TestPlatformReferenceIgnoresCodeConstructs(t *testing.T) {
 		t.Errorf("expected no findings for RN platform code, got %d: %+v", len(got), got)
 	}
 
-	dirty := tsCtx(`const msg = "Also available on the Google Play store"`)
-	if got := r.Check(dirty); len(got) == 0 {
-		t.Errorf("expected a finding for a competitor mention in a user-facing string")
+	dirty := tsCtx(
+		`const msg = "Also available on the Google Play store"`,
+		`const cta = "Download from 'Google Play'"`, // "from '" inside copy must NOT be ignored
+	)
+	if got := r.Check(dirty); len(got) != 2 {
+		t.Errorf("expected 2 findings for competitor mentions, got %d: %+v", len(got), got)
 	}
 }
 
