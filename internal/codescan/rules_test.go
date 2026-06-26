@@ -17,6 +17,53 @@ func swiftCtx(lines ...string) FileContext {
 	return FileContext{Path: "X.swift", RelPath: "X.swift", Lines: lines, Language: "swift"}
 }
 
+func tsCtx(lines ...string) FileContext {
+	return FileContext{Path: "X.ts", RelPath: "X.ts", Lines: lines, Language: "typescript"}
+}
+
+// §2.5 hardcoded-ipv4 must flag genuine IPv4 literals but not 4-part
+// version/build strings, which were previously misread as addresses.
+func TestHardcodedIPv4IgnoresVersionStrings(t *testing.T) {
+	r := ruleByID(t, "hardcoded-ipv4")
+
+	clean := tsCtx(
+		`const sdkVersion = "8.4.1.2"`, // version keyword guard
+		`const build = "2020.10.5.1"`,  // 2020 is not a valid octet
+		`const x = "999.1.2.3"`,        // 999 is not a valid octet
+		`const local = "127.0.0.1"`,    // loopback ignored
+	)
+	if got := r.Check(clean); len(got) != 0 {
+		t.Errorf("expected no findings for version/invalid/loopback, got %d: %+v", len(got), got)
+	}
+
+	dirty := tsCtx(`const host = "192.168.1.42"`)
+	if got := r.Check(dirty); len(got) == 0 {
+		t.Errorf("expected a finding for a real hardcoded IPv4 address")
+	}
+}
+
+// §2.3 platform-reference must flag competitor mentions in user-facing copy but
+// not React Native platform branches or imports — a bare unquoted match used to
+// fire on virtually every RN app.
+func TestPlatformReferenceIgnoresCodeConstructs(t *testing.T) {
+	r := ruleByID(t, "platform-reference")
+
+	clean := tsCtx(
+		`if (Platform.OS === 'android') { doThing() }`,
+		`const styles = Platform.select({ android: {}, ios: {} })`,
+		`import Foo from 'react-native-android-foo'`,
+		`} from '@react-native-community/android'`,
+	)
+	if got := r.Check(clean); len(got) != 0 {
+		t.Errorf("expected no findings for RN platform code, got %d: %+v", len(got), got)
+	}
+
+	dirty := tsCtx(`const msg = "Also available on the Google Play store"`)
+	if got := r.Check(dirty); len(got) == 0 {
+		t.Errorf("expected a finding for a competitor mention in a user-facing string")
+	}
+}
+
 // The §2.1 placeholder-content rule must not fire on SwiftUI's `placeholder:`
 // parameter or example hint text. It used to match the bare word "placeholder",
 // turning normal apps into dozens of warnings; re-adding it would fail this test.

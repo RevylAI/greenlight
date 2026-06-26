@@ -46,7 +46,7 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)(\.creationDate|\.modificationDate|\.contentModificationDate|fileModificationDate|URLResourceKey\.contentModification)`),
 			regexp.MustCompile(`(?i)(NSFileCreationDate|NSFileModificationDate)`),
-			regexp.MustCompile(`(?i)(stat\(\)|fstat\(\)|lstat\(\)|getattrlist)`),
+			regexp.MustCompile(`(?i)(\bstat\s*\(|\bfstat\s*\(|\blstat\s*\(|getattrlist)`),
 		},
 		Languages:   []string{"swift", "objc", "typescript", "javascript"},
 		Description: "Accessing file timestamps (creation date, modification date)",
@@ -67,7 +67,7 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)(volumeAvailableCapacity|volumeTotalCapacity|\.availableCapacity)`),
 			regexp.MustCompile(`(?i)(NSFileSystemFreeSize|NSFileSystemSize|systemFreeSize)`),
-			regexp.MustCompile(`(?i)(statfs\(\)|statvfs\(\))`),
+			regexp.MustCompile(`(?i)(\bstatfs\s*\(|\bstatvfs\s*\()`),
 		},
 		Languages:   []string{"swift", "objc"},
 		Description: "Querying disk space (available capacity, total capacity)",
@@ -85,7 +85,7 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 		Name:    "User Defaults",
 		APIType: "NSPrivacyAccessedAPICategoryUserDefaults",
 		Patterns: []*regexp.Regexp{
-			regexp.MustCompile(`(?i)(UserDefaults|NSUserDefaults|\\.standard\\.)`),
+			regexp.MustCompile(`(?i)(UserDefaults|NSUserDefaults)`),
 			regexp.MustCompile(`(?i)(AsyncStorage|@react-native-async-storage)`),
 		},
 		Languages:   []string{"swift", "objc", "typescript", "javascript"},

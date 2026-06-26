@@ -167,10 +167,18 @@ func AllRules() []Rule {
 			fix:       "Remove references to competing platforms from all user-visible text.",
 			languages: []string{"swift", "objc", "typescript", "javascript"},
 			patterns: []*regexp.Regexp{
+				// Only flag the keyword inside a string/JSX literal — user-facing
+				// copy is the §2.3 risk. A bare unquoted match flagged every React
+				// Native app (Platform.OS checks, imports, package paths).
 				regexp.MustCompile(`(?i)"[^"]*\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b[^"]*"`),
 				regexp.MustCompile(`(?i)'[^']*\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b[^']*'`),
 				regexp.MustCompile("(?i)`[^`]*\\b(android|google\\s*play|play\\s*store|samsung|windows\\s*phone)\\b[^`]*`"),
-				regexp.MustCompile(`(?i)\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b`), // bare text (JSX content)
+			},
+			ignorePatterns: []*regexp.Regexp{
+				// Code constructs that legitimately contain these keywords but are
+				// not user-facing copy: RN platform branches, imports/requires,
+				// package names, file paths, and build config.
+				regexp.MustCompile(`(?i)(Platform\.|import |require\(|from\s+['"]|@react-native|androidx|\.android\b|/android/|BuildConfig|\.gradle)`),
 			},
 		},
 		&PatternRule{
@@ -213,10 +221,12 @@ func AllRules() []Rule {
 			fix:       "Use hostnames instead of IP addresses. Ensure all networking supports IPv6.",
 			languages: []string{"swift", "objc", "typescript", "javascript"},
 			patterns: []*regexp.Regexp{
-				regexp.MustCompile(`\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b`),
+				// Require valid 0-255 octets so version/build strings like
+				// "2020.10.5.1" or "999.1.2.3" aren't mistaken for an IPv4 address.
+				regexp.MustCompile(`\b(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])){3}\b`),
 			},
 			ignorePatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(version|0\.0\.0|127\.0\.0\.1|localhost)`), // ignore version strings and localhost
+				regexp.MustCompile(`(?i)(version|build|sdk|revision|0\.0\.0|127\.0\.0\.1|localhost)`), // version/build strings and localhost
 			},
 		},
 		&PatternRule{

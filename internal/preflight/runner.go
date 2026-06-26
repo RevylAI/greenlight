@@ -170,6 +170,19 @@ func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
 	// Deduplicate findings with the same title from different scanners
 	result.Findings = dedup(result.Findings)
 
+	// A sub-scanner that errored contributes zero findings; surface each failure
+	// as a warning (appended after dedup so distinct failures aren't collapsed)
+	// so a crashed scanner can't masquerade as a clean "no issues found".
+	for err := range errs {
+		result.Findings = append(result.Findings, Finding{
+			Source:   "scan",
+			Severity: "WARN",
+			Title:    "Scanner did not complete",
+			Detail:   err.Error(),
+			Fix:      "Results may be incomplete; re-run with --verbose for details.",
+		})
+	}
+
 	// Compute summary
 	result.Summary = computeSummary(result.Findings)
 

@@ -565,8 +565,10 @@ func writeTempYAML(name, content string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// The rendered YAML can inline secret --var values (passwords, tokens), so
+	// keep it owner-only. MkdirTemp already makes the parent dir 0700.
 	path := filepath.Join(dir, name+".yaml")
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		os.RemoveAll(dir)
 		return "", err
 	}
