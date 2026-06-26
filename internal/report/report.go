@@ -7,8 +7,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/RevylAI/greenlight/internal/checks"
+	"github.com/fatih/color"
 )
 
 var (

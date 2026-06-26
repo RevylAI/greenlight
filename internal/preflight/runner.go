@@ -11,7 +11,7 @@ import (
 
 // Finding is the unified finding type across all scanners.
 type Finding struct {
-	Source    string `json:"source"` // "codescan", "privacy", "ipa", "metadata"
+	Source    string `json:"source"`   // "codescan", "privacy", "ipa", "metadata"
 	Severity  string `json:"severity"` // "CRITICAL", "WARN", "INFO"
 	Guideline string `json:"guideline,omitempty"`
 	Title     string `json:"title"`
@@ -24,10 +24,10 @@ type Finding struct {
 
 // Result holds the combined output from all scanners.
 type Result struct {
-	ProjectPath string    `json:"project_path"`
-	IPAPath     string    `json:"ipa_path,omitempty"`
-	Findings    []Finding `json:"findings"`
-	Summary     Summary   `json:"summary"`
+	ProjectPath string        `json:"project_path"`
+	IPAPath     string        `json:"ipa_path,omitempty"`
+	Findings    []Finding     `json:"findings"`
+	Summary     Summary       `json:"summary"`
 	Elapsed     time.Duration `json:"elapsed"`
 
 	// Extra context from sub-scanners

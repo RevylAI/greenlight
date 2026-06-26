@@ -345,9 +345,9 @@ var requiredScreenshotDimensions = map[string]struct {
 	width  int
 	height int
 }{
-	"APP_IPHONE_67":  {"iPhone 6.7\"", 1290, 2796},
-	"APP_IPHONE_65":  {"iPhone 6.5\"", 1284, 2778},
-	"APP_IPHONE_55":  {"iPhone 5.5\"", 1242, 2208},
+	"APP_IPHONE_67":         {"iPhone 6.7\"", 1290, 2796},
+	"APP_IPHONE_65":         {"iPhone 6.5\"", 1284, 2778},
+	"APP_IPHONE_55":         {"iPhone 5.5\"", 1242, 2208},
 	"APP_IPAD_PRO_3GEN_129": {"iPad Pro 12.9\"", 2048, 2732},
 	"APP_IPAD_PRO_129":      {"iPad Pro 12.9\" (2nd gen)", 2048, 2732},
 }
@@ -448,19 +448,19 @@ func checkTerritoryAvailability(ctx context.Context, client *asc.Client, appID s
 
 	if len(territories) == 0 {
 		*findings = append(*findings, Finding{
-			Tier:      TierMetadata,
-			Severity:  SeverityBlock,
-			Title:     "App not available in any territory",
-			Detail:    "The app has no territory availability configured.",
-			Fix:       "Set territory availability in App Store Connect → Pricing and Availability.",
+			Tier:     TierMetadata,
+			Severity: SeverityBlock,
+			Title:    "App not available in any territory",
+			Detail:   "The app has no territory availability configured.",
+			Fix:      "Set territory availability in App Store Connect → Pricing and Availability.",
 		})
 	} else if len(territories) < 5 {
 		*findings = append(*findings, Finding{
-			Tier:      TierMetadata,
-			Severity:  SeverityInfo,
-			Title:     fmt.Sprintf("App available in only %d territories", len(territories)),
-			Detail:    "Your app is available in very few territories. Consider expanding for wider reach.",
-			Fix:       "Review territory availability in App Store Connect → Pricing and Availability.",
+			Tier:     TierMetadata,
+			Severity: SeverityInfo,
+			Title:    fmt.Sprintf("App available in only %d territories", len(territories)),
+			Detail:   "Your app is available in very few territories. Consider expanding for wider reach.",
+			Fix:      "Review territory availability in App Store Connect → Pricing and Availability.",
 		})
 	}
 
@@ -478,11 +478,11 @@ func checkPricingConsistency(ctx context.Context, client *asc.Client, appID stri
 
 	if len(prices) == 0 {
 		*findings = append(*findings, Finding{
-			Tier:      TierMetadata,
-			Severity:  SeverityWarn,
-			Title:     "No price schedule configured",
-			Detail:    "No pricing information found. Ensure your app's price (including Free) is explicitly set.",
-			Fix:       "Set pricing in App Store Connect → Pricing and Availability.",
+			Tier:     TierMetadata,
+			Severity: SeverityWarn,
+			Title:    "No price schedule configured",
+			Detail:   "No pricing information found. Ensure your app's price (including Free) is explicitly set.",
+			Fix:      "Set pricing in App Store Connect → Pricing and Availability.",
 		})
 	}
 

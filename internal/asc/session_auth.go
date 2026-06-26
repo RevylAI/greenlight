@@ -12,20 +12,20 @@ import (
 )
 
 const (
-	appleAuthURL = "https://idmsa.apple.com/appleauth/auth"
+	appleAuthURL  = "https://idmsa.apple.com/appleauth/auth"
 	ascSessionURL = "https://appstoreconnect.apple.com/olympus/v1/session"
 )
 
 // Session holds Apple ID session state for authenticated requests.
 type Session struct {
-	AppleID     string            `json:"apple_id"`
-	SessionID   string            `json:"session_id"`
-	Scnt        string            `json:"scnt"`
-	Cookies     []*SerializedCookie `json:"cookies"`
-	TeamID      string            `json:"team_id,omitempty"`
-	ProviderID  string            `json:"provider_id,omitempty"`
-	ExpiresAt   time.Time         `json:"expires_at"`
-	httpClient  *http.Client
+	AppleID    string              `json:"apple_id"`
+	SessionID  string              `json:"session_id"`
+	Scnt       string              `json:"scnt"`
+	Cookies    []*SerializedCookie `json:"cookies"`
+	TeamID     string              `json:"team_id,omitempty"`
+	ProviderID string              `json:"provider_id,omitempty"`
+	ExpiresAt  time.Time           `json:"expires_at"`
+	httpClient *http.Client
 }
 
 // SerializedCookie is a JSON-safe cookie representation.
@@ -63,9 +63,9 @@ type SessionInfo struct {
 		Email    string `json:"emailAddress"`
 	} `json:"user"`
 	Provider struct {
-		ProviderID   int    `json:"providerId"`
-		Name         string `json:"name"`
-		PublicKeyID  string `json:"publicKeyId"`
+		ProviderID  int    `json:"providerId"`
+		Name        string `json:"name"`
+		PublicKeyID string `json:"publicKeyId"`
 	} `json:"provider"`
 	AvailableProviders []struct {
 		ProviderID int    `json:"providerId"`
@@ -76,11 +76,11 @@ type SessionInfo struct {
 // commonHeaders returns the headers Apple expects for auth requests.
 func commonHeaders() map[string]string {
 	return map[string]string{
-		"Content-Type":           "application/json",
-		"Accept":                 "application/json",
-		"X-Requested-With":      "XMLHttpRequest",
-		"X-Apple-Widget-Key":    "e0b80c3bf78523bfe80571b6ff2e766c", // Public widget key used by ASC web
-		"User-Agent":            "greenlight/1.0",
+		"Content-Type":       "application/json",
+		"Accept":             "application/json",
+		"X-Requested-With":   "XMLHttpRequest",
+		"X-Apple-Widget-Key": "e0b80c3bf78523bfe80571b6ff2e766c", // Public widget key used by ASC web
+		"User-Agent":         "greenlight/1.0",
 	}
 }
 

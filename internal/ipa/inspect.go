@@ -231,8 +231,8 @@ func (r *InspectResult) checkInfoPlist(files map[string]*zip.File, appDir string
 		guideline string
 		title     string
 	}{
-		"CFBundleDisplayName":   {"2.3", "Missing CFBundleDisplayName"},
-		"CFBundleVersion":      {"2.1", "Missing CFBundleVersion (build number)"},
+		"CFBundleDisplayName":        {"2.3", "Missing CFBundleDisplayName"},
+		"CFBundleVersion":            {"2.1", "Missing CFBundleVersion (build number)"},
 		"CFBundleShortVersionString": {"2.1", "Missing CFBundleShortVersionString (version)"},
 	}
 

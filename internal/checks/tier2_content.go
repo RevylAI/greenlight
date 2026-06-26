@@ -55,9 +55,9 @@ func checkPlatformReferences(ctx context.Context, client *asc.Client, appID stri
 	for _, loc := range localizations {
 		locale := loc.Attributes.Locale
 		fields := map[string]string{
-			"description":     loc.Attributes.Description,
-			"keywords":        loc.Attributes.Keywords,
-			"what's new":      loc.Attributes.WhatsNew,
+			"description":      loc.Attributes.Description,
+			"keywords":         loc.Attributes.Keywords,
+			"what's new":       loc.Attributes.WhatsNew,
 			"promotional text": loc.Attributes.PromotionalText,
 		}
 
@@ -96,9 +96,9 @@ func checkPlaceholderContent(ctx context.Context, client *asc.Client, appID stri
 	for _, loc := range localizations {
 		locale := loc.Attributes.Locale
 		fields := map[string]string{
-			"description":     loc.Attributes.Description,
-			"keywords":        loc.Attributes.Keywords,
-			"what's new":      loc.Attributes.WhatsNew,
+			"description":      loc.Attributes.Description,
+			"keywords":         loc.Attributes.Keywords,
+			"what's new":       loc.Attributes.WhatsNew,
 			"promotional text": loc.Attributes.PromotionalText,
 		}
 

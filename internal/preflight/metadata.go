@@ -78,7 +78,7 @@ type expoConfig struct {
 			InfoPlist        map[string]interface{} `json:"infoPlist"`
 			PrivacyManifests interface{}            `json:"privacyManifests"`
 		} `json:"ios"`
-		Icon    string `json:"icon"`
+		Icon    string        `json:"icon"`
 		Plugins []interface{} `json:"plugins"`
 	} `json:"expo"`
 }
@@ -295,17 +295,17 @@ func checkInfoPlistLocal(data []byte, plistPath, projectPath string) ([]Finding,
 
 	// Check purpose strings quality
 	purposeStrings := map[string]string{
-		"NSCameraUsageDescription":              "Camera",
-		"NSMicrophoneUsageDescription":          "Microphone",
-		"NSPhotoLibraryUsageDescription":        "Photo Library",
-		"NSLocationWhenInUseUsageDescription":   "Location",
-		"NSLocationAlwaysUsageDescription":      "Location (Always)",
-		"NSUserTrackingUsageDescription":        "User Tracking",
-		"NSFaceIDUsageDescription":              "Face ID",
-		"NSContactsUsageDescription":            "Contacts",
-		"NSCalendarsUsageDescription":           "Calendars",
-		"NSHealthShareUsageDescription":         "HealthKit",
-		"NSBluetoothAlwaysUsageDescription":     "Bluetooth",
+		"NSCameraUsageDescription":            "Camera",
+		"NSMicrophoneUsageDescription":        "Microphone",
+		"NSPhotoLibraryUsageDescription":      "Photo Library",
+		"NSLocationWhenInUseUsageDescription": "Location",
+		"NSLocationAlwaysUsageDescription":    "Location (Always)",
+		"NSUserTrackingUsageDescription":      "User Tracking",
+		"NSFaceIDUsageDescription":            "Face ID",
+		"NSContactsUsageDescription":          "Contacts",
+		"NSCalendarsUsageDescription":         "Calendars",
+		"NSHealthShareUsageDescription":       "HealthKit",
+		"NSBluetoothAlwaysUsageDescription":   "Bluetooth",
 	}
 
 	for key, name := range purposeStrings {

@@ -31,12 +31,12 @@ type RequiredReasonAPI struct {
 
 // ScanResult holds the full privacy scan output.
 type ScanResult struct {
-	ProjectPath     string    `json:"project_path"`
-	HasPrivacyInfo  bool      `json:"has_privacy_info"`
-	DetectedAPIs    []string  `json:"detected_apis"`
-	DeclaredAPIs    []string  `json:"declared_apis"`
-	TrackingSDKs    []string  `json:"tracking_sdks,omitempty"`
-	Findings        []Finding `json:"findings"`
+	ProjectPath    string    `json:"project_path"`
+	HasPrivacyInfo bool      `json:"has_privacy_info"`
+	DetectedAPIs   []string  `json:"detected_apis"`
+	DeclaredAPIs   []string  `json:"declared_apis"`
+	TrackingSDKs   []string  `json:"tracking_sdks,omitempty"`
+	Findings       []Finding `json:"findings"`
 }
 
 var requiredReasonAPIs = []RequiredReasonAPI{
