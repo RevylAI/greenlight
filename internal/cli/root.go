@@ -33,6 +33,8 @@ Get started:
 
 func SetVersion(v string) {
 	appVersion = v
+	// Enables `greenlight --version` (cobra auto-adds the flag when set).
+	rootCmd.Version = resolveVersion()
 }
 
 func Execute() error {

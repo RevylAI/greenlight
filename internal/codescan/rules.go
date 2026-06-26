@@ -340,6 +340,11 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 
 		for _, pattern := range r.patterns {
 			if pattern.MatchString(line) {
+				// Honor an inline `// greenlight:ignore[ rule-id]` directive on the
+				// matching line or the line directly above it.
+				if suppressedByIgnore(fc.Lines, lineNum, r.id) {
+					break
+				}
 				findings = append(findings, Finding{
 					Severity:  r.severity,
 					Guideline: r.guideline,
@@ -367,6 +372,42 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 	}
 
 	return findings
+}
+
+// suppressedByIgnore reports whether the matching line, or the line directly
+// above it, carries a `greenlight:ignore` directive. A bare directive suppresses
+// every rule; `greenlight:ignore <rule-id>[ <rule-id>...]` suppresses only the
+// listed rules.
+func suppressedByIgnore(lines []string, lineNum int, ruleID string) bool {
+	if directiveSuppresses(lines[lineNum], ruleID) {
+		return true
+	}
+	return lineNum > 0 && directiveSuppresses(lines[lineNum-1], ruleID)
+}
+
+func directiveSuppresses(line, ruleID string) bool {
+	const marker = "greenlight:ignore"
+	i := strings.Index(line, marker)
+	if i < 0 {
+		return false
+	}
+	rest := strings.TrimSpace(line[i+len(marker):])
+	rest = strings.TrimLeft(rest, ":= \t")
+	// Drop a trailing comment close so `/* greenlight:ignore */` and the XML
+	// `<!-- greenlight:ignore -->` forms register as bare directives.
+	rest = strings.TrimSpace(strings.TrimSuffix(rest, "-->"))
+	rest = strings.TrimSpace(strings.TrimSuffix(rest, "*/"))
+	if rest == "" {
+		return true // bare directive: suppress every rule on the line
+	}
+	for _, tok := range strings.FieldsFunc(rest, func(r rune) bool {
+		return r == ' ' || r == ',' || r == '\t'
+	}) {
+		if tok == ruleID {
+			return true
+		}
+	}
+	return false
 }
 
 // PlistKeyRule checks Info.plist for required privacy keys when certain frameworks are detected.

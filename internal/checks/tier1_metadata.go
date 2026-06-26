@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/RevylAI/greenlight/internal/asc"
 )
@@ -119,12 +120,12 @@ func checkMetadataCompleteness(ctx context.Context, client *asc.Client, appID st
 				Detail:    "A description is required for App Store submission.",
 				Fix:       "Add a description in App Store Connect → Version Information.",
 			})
-		} else if len(desc) > maxDescriptionLength {
+		} else if utf8.RuneCountInString(desc) > maxDescriptionLength {
 			*findings = append(*findings, Finding{
 				Tier:      TierMetadata,
 				Severity:  SeverityBlock,
 				Guideline: "2.3",
-				Title:     fmt.Sprintf("[%s] Description exceeds %d character limit (%d chars)", locale, maxDescriptionLength, len(desc)),
+				Title:     fmt.Sprintf("[%s] Description exceeds %d character limit (%d chars)", locale, maxDescriptionLength, utf8.RuneCountInString(desc)),
 				Detail:    "App Store Connect enforces a maximum description length.",
 				Fix:       fmt.Sprintf("Shorten your description to %d characters or less.", maxDescriptionLength),
 			})
@@ -141,12 +142,12 @@ func checkMetadataCompleteness(ctx context.Context, client *asc.Client, appID st
 				Detail:    "Keywords help users discover your app and are recommended.",
 				Fix:       "Add relevant keywords separated by commas.",
 			})
-		} else if len(kw) > maxKeywordsLength {
+		} else if utf8.RuneCountInString(kw) > maxKeywordsLength {
 			*findings = append(*findings, Finding{
 				Tier:      TierMetadata,
 				Severity:  SeverityBlock,
 				Guideline: "2.3",
-				Title:     fmt.Sprintf("[%s] Keywords exceed %d character limit (%d chars)", locale, maxKeywordsLength, len(kw)),
+				Title:     fmt.Sprintf("[%s] Keywords exceed %d character limit (%d chars)", locale, maxKeywordsLength, utf8.RuneCountInString(kw)),
 				Detail:    "Keywords field has a strict 100-character limit including commas and spaces.",
 				Fix:       "Shorten your keywords to 100 characters. Remove less important terms or use shorter synonyms.",
 			})
@@ -166,12 +167,12 @@ func checkMetadataCompleteness(ctx context.Context, client *asc.Client, appID st
 
 		// Promotional text: length limit
 		pt := strings.TrimSpace(attrs.PromotionalText)
-		if pt != "" && len(pt) > maxPromotionalTextLength {
+		if pt != "" && utf8.RuneCountInString(pt) > maxPromotionalTextLength {
 			*findings = append(*findings, Finding{
 				Tier:      TierMetadata,
 				Severity:  SeverityBlock,
 				Guideline: "2.3",
-				Title:     fmt.Sprintf("[%s] Promotional text exceeds %d character limit (%d chars)", locale, maxPromotionalTextLength, len(pt)),
+				Title:     fmt.Sprintf("[%s] Promotional text exceeds %d character limit (%d chars)", locale, maxPromotionalTextLength, utf8.RuneCountInString(pt)),
 				Detail:    "Promotional text has a 170-character limit.",
 				Fix:       fmt.Sprintf("Shorten your promotional text to %d characters.", maxPromotionalTextLength),
 			})
@@ -496,12 +497,12 @@ func checkAppNameLength(ctx context.Context, client *asc.Client, appID string, f
 	}
 
 	name := strings.TrimSpace(app.Attributes.Name)
-	if len(name) > maxAppNameLength {
+	if utf8.RuneCountInString(name) > maxAppNameLength {
 		*findings = append(*findings, Finding{
 			Tier:      TierMetadata,
 			Severity:  SeverityBlock,
 			Guideline: "2.3",
-			Title:     fmt.Sprintf("App name exceeds %d character limit (%d chars)", maxAppNameLength, len(name)),
+			Title:     fmt.Sprintf("App name exceeds %d character limit (%d chars)", maxAppNameLength, utf8.RuneCountInString(name)),
 			Detail:    "App Store app names are limited to 30 characters.",
 			Fix:       fmt.Sprintf("Shorten your app name to %d characters or less.", maxAppNameLength),
 		})

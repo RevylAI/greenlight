@@ -17,6 +17,33 @@ func swiftCtx(lines ...string) FileContext {
 	return FileContext{Path: "X.swift", RelPath: "X.swift", Lines: lines, Language: "swift"}
 }
 
+// An inline `// greenlight:ignore` directive (bare or rule-specific), on the
+// matching line or the line directly above it, suppresses the finding.
+func TestInlineIgnoreDirective(t *testing.T) {
+	r := ruleByID(t, "hardcoded-ipv4")
+
+	suppressed := []FileContext{
+		swiftCtx(`let host = "10.1.2.3" // greenlight:ignore`),                   // bare, same line
+		swiftCtx(`let host = "10.1.2.3" // greenlight:ignore hardcoded-ipv4`),    // rule-specific, same line
+		swiftCtx(`// greenlight:ignore hardcoded-ipv4`, `let host = "10.1.2.3"`), // directive on line above
+		swiftCtx(`/* greenlight:ignore */`, `let host = "10.1.2.3"`),             // block-comment bare
+	}
+	for i, ctx := range suppressed {
+		if got := r.Check(ctx); len(got) != 0 {
+			t.Errorf("case %d: expected suppression, got %d findings: %+v", i, len(got), got)
+		}
+	}
+
+	// A directive naming a different rule must NOT suppress this one; and with no
+	// directive the rule still fires.
+	if got := r.Check(swiftCtx(`let host = "10.1.2.3" // greenlight:ignore some-other-rule`)); len(got) == 0 {
+		t.Error("a directive for a different rule should not suppress this finding")
+	}
+	if got := r.Check(swiftCtx(`let host = "10.1.2.3"`)); len(got) == 0 {
+		t.Error("expected a finding when no ignore directive is present")
+	}
+}
+
 // The §2.1 placeholder-content rule must not fire on SwiftUI's `placeholder:`
 // parameter or example hint text. It used to match the bare word "placeholder",
 // turning normal apps into dozens of warnings; re-adding it would fail this test.
