@@ -258,12 +258,13 @@ func AllRules() []Rule {
 			languages: []string{"swift", "objc"},
 			patterns: []*regexp.Regexp{
 				// Require a real usage context (call, ObjC pointer, type position,
-				// or the Delegate protocol) so a mention inside a string literal or
-				// a trailing comment doesn't trip this CRITICAL rule.
+				// or the Delegate protocol). codeOnly below also blanks string
+				// literals + comments so a textual mention can't trip this CRITICAL.
 				regexp.MustCompile(`\bUIWebView\s*[(*]`), // UIWebView(  /  UIWebView *
 				regexp.MustCompile(`\bUIWebViewDelegate\b`),
 				regexp.MustCompile(`[:\[]\s*UIWebView\b`), // : UIWebView  /  [UIWebView
 			},
+			codeOnly: true,
 		},
 		&PatternRule{
 			id:        "vague-purpose-string",
@@ -308,6 +309,7 @@ type PatternRule struct {
 	ignorePatterns     []*regexp.Regexp // Lines matching these are skipped
 	countThreshold     int              // Only report if count exceeds this
 	firstMatchOnly     bool             // Project-level fact: cap to one per file; scanner collapses to one per project
+	codeOnly           bool             // Strip string literals + comments before matching (for rules that must not fire on text)
 }
 
 func (r *PatternRule) RuleID() string { return r.id }
@@ -358,8 +360,15 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 			continue
 		}
 
+		// codeOnly rules match against a copy with string literals and comments
+		// blanked out, so a mention in text (e.g. "use UIWebView()") doesn't fire.
+		matchLine := line
+		if r.codeOnly {
+			matchLine = stripStringsAndComments(line)
+		}
+
 		for _, pattern := range r.patterns {
-			if pattern.MatchString(line) {
+			if pattern.MatchString(matchLine) {
 				findings = append(findings, Finding{
 					Severity:  r.severity,
 					Guideline: r.guideline,
@@ -387,6 +396,45 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 	}
 
 	return findings
+}
+
+// stripStringsAndComments blanks out the contents of "..."/'...' string literals
+// and removes // line comments and /* */ block comments, so codeOnly rules match
+// only real code. It's a lightweight scan (no escaped-quote handling), which is
+// enough to keep call-shaped text like "UIWebView()" out of the match.
+func stripStringsAndComments(line string) string {
+	var b strings.Builder
+	b.Grow(len(line))
+	inStr := false
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inStr {
+			b.WriteByte(' ')
+			if c == quote {
+				inStr = false
+			}
+			continue
+		}
+		switch {
+		case c == '"' || c == '\'' || c == '`':
+			inStr = true
+			quote = c
+			b.WriteByte(' ')
+		case c == '/' && i+1 < len(line) && line[i+1] == '/':
+			return b.String() // rest of the line is a comment
+		case c == '/' && i+1 < len(line) && line[i+1] == '*':
+			end := strings.Index(line[i+2:], "*/")
+			if end < 0 {
+				return b.String() // unterminated block comment
+			}
+			i += end + 3 // skip past the closing */
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // PlistKeyRule checks Info.plist for required privacy keys when certain frameworks are detected.

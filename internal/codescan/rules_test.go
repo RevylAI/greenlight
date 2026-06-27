@@ -34,9 +34,11 @@ func TestUIWebViewRemoved(t *testing.T) {
 		`let w = WKWebView()`,
 		`let x = MyUIWebView()`,
 		`let y = MyUIWebViewWrapper()`,
-		`let s = "UIWebView"`,                            // string literal, not usage
-		`logEvent("UIWebView_fallback_shown")`,           // identifier inside a string
-		`let w = WKWebView() // migrated from UIWebView`, // trailing-comment mention
+		`let s = "UIWebView"`,                              // string literal, not usage
+		`logEvent("UIWebView_fallback_shown")`,             // identifier inside a string
+		`let w = WKWebView() // migrated from UIWebView`,   // trailing-comment mention
+		`let message = "Remove UIWebView() from old docs"`, // call-shaped text in a string
+		`let web = WKWebView() // TODO remove UIWebView()`, // call-shaped text in a comment
 	}
 	for _, line := range negatives {
 		if got := r.Check(swiftCtx(line)); len(got) != 0 {
