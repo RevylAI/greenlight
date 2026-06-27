@@ -14,6 +14,7 @@ type Scanner struct {
 	root    string
 	verbose bool
 	rules   []Rule
+	cfg     *Config
 }
 
 // FileContext holds a scanned file and its lines for pattern matching.
@@ -25,11 +26,19 @@ type FileContext struct {
 }
 
 func NewScanner(root string, verbose bool) *Scanner {
+	return NewScannerWithConfig(root, verbose, nil)
+}
+
+// NewScannerWithConfig builds a scanner applying an optional .greenlight.yml
+// (rule enable/disable, severity overrides, path ignores). A nil cfg is the
+// default behavior.
+func NewScannerWithConfig(root string, verbose bool, cfg *Config) *Scanner {
 	s := &Scanner{
 		root:    root,
 		verbose: verbose,
+		cfg:     cfg,
 	}
-	s.rules = AllRules()
+	s.rules = cfg.applyRules(AllRules())
 	return s
 }
 
@@ -169,6 +178,11 @@ func (s *Scanner) collectFiles() ([]FileContext, error) {
 		}
 
 		relPath, _ := filepath.Rel(s.root, path)
+
+		// Honor .greenlight.yml ignore globs.
+		if s.cfg.ignores(relPath) {
+			return nil
+		}
 
 		lines, err := readLines(path)
 		if err != nil {
