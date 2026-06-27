@@ -1,4 +1,5 @@
 build/
+dist/
 *.exe
 .DS_Store
 .env

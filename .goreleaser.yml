@@ -1,0 +1,57 @@
+# GoReleaser config — builds, archives, checksums, a GitHub release, and the
+# Homebrew tap formula on every `vX.Y.Z` tag. See .github/workflows/release.yml.
+version: 2
+
+project_name: greenlight
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: greenlight
+    main: ./cmd/greenlight
+    binary: greenlight
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    # Inject the tag into main.version (matches the Makefile's -X main.version).
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: greenlight
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+
+homebrew_casks:
+  - name: greenlight
+    repository:
+      owner: RevylAI
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: "https://github.com/RevylAI/greenlight"
+    description: "Pre-submission compliance scanner for the Apple App Store"
+    # Strip the quarantine xattr so the unsigned binary runs without a Gatekeeper prompt.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/greenlight"]
+          end
