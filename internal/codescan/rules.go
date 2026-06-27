@@ -379,6 +379,11 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 
 		for _, pattern := range r.patterns {
 			if pattern.MatchString(matchLine) {
+				// Honor an inline `// greenlight:ignore[ rule-id]` directive on the
+				// matching line or the line directly above it.
+				if suppressedByIgnore(fc.Lines, lineNum, r.id) {
+					break
+				}
 				findings = append(findings, Finding{
 					Severity:  r.severity,
 					Guideline: r.guideline,
@@ -445,6 +450,73 @@ func stripStringsAndComments(line string) string {
 		}
 	}
 	return b.String()
+}
+
+// suppressedByIgnore reports whether the matching line, or the line directly
+// above it, carries a `greenlight:ignore` directive. A bare directive suppresses
+// every rule; `greenlight:ignore <rule-id>[ <rule-id>...]` suppresses only the
+// listed rules.
+func suppressedByIgnore(lines []string, lineNum int, ruleID string) bool {
+	// A directive on this line (trailing or standalone) suppresses this line.
+	if directiveSuppresses(lines[lineNum], ruleID) {
+		return true
+	}
+	// The line above carries to this line only when it is a STANDALONE directive
+	// comment — otherwise a trailing directive on a code line would also silence
+	// a real finding on the next line.
+	if lineNum > 0 {
+		above := strings.TrimSpace(lines[lineNum-1])
+		if isCommentLine(above) && directiveSuppresses(above, ruleID) {
+			return true
+		}
+	}
+	return false
+}
+
+func isCommentLine(trimmed string) bool {
+	return strings.HasPrefix(trimmed, "//") ||
+		strings.HasPrefix(trimmed, "/*") ||
+		strings.HasPrefix(trimmed, "*") ||
+		strings.HasPrefix(trimmed, "<!--")
+}
+
+// directiveSuppresses reports whether line carries a directive suppressing
+// ruleID. The marker must be the first token of a comment (only whitespace
+// between the comment opener and the marker) so prose that merely mentions
+// "greenlight:ignore" is not a directive. A directive with no trailing tokens is
+// "bare" and suppresses every rule; otherwise each whitespace/comma-separated
+// token is matched against ruleID, so `greenlight:ignore <id> <reason>` works
+// but `greenlight:ignore <reason>` (no id) does NOT blanket-suppress.
+func directiveSuppresses(line, ruleID string) bool {
+	const marker = "greenlight:ignore"
+	i := strings.Index(line, marker)
+	if i < 0 || !commentOpensJustBefore(line[:i]) {
+		return false
+	}
+	rest := strings.TrimSpace(line[i+len(marker):])
+	rest = strings.TrimLeft(rest, ":= \t")
+	// Drop a trailing comment close so `/* greenlight:ignore */` and the XML
+	// `<!-- greenlight:ignore -->` forms register as bare directives.
+	rest = strings.TrimSpace(strings.TrimSuffix(rest, "-->"))
+	rest = strings.TrimSpace(strings.TrimSuffix(rest, "*/"))
+	if rest == "" {
+		return true // bare directive: suppress every rule on the line
+	}
+	for _, tok := range strings.FieldsFunc(rest, func(r rune) bool {
+		return r == ' ' || r == ',' || r == '\t'
+	}) {
+		if tok == ruleID {
+			return true
+		}
+	}
+	return false
+}
+
+// commentOpensJustBefore reports whether the text immediately preceding the
+// marker is a comment opener followed only by whitespace.
+func commentOpensJustBefore(before string) bool {
+	t := strings.TrimRight(before, " \t")
+	return strings.HasSuffix(t, "//") || strings.HasSuffix(t, "/*") || strings.HasSuffix(t, "<!--")
 }
 
 // PlistKeyRule checks Info.plist for required privacy keys when certain frameworks are detected.

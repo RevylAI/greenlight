@@ -7,7 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  format:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -16,11 +16,32 @@ jobs:
         with:
           go-version: "1.24"
 
-      - name: Build
-        run: go build ./...
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files are not gofmt-formatted (run: gofmt -w .):"
+            echo "$unformatted"
+            exit 1
+          fi
+
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
 
       - name: Vet
         run: go vet ./...
 
+      - name: Build
+        run: go build ./...
+
       - name: Test
-        run: go test ./...
+        run: go test -race ./...

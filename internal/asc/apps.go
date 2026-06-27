@@ -9,10 +9,10 @@ type App struct {
 }
 
 type AppAttributes struct {
-	Name             string `json:"name"`
-	BundleID         string `json:"bundleId"`
-	SKU              string `json:"sku"`
-	PrimaryLocale    string `json:"primaryLocale"`
+	Name                     string `json:"name"`
+	BundleID                 string `json:"bundleId"`
+	SKU                      string `json:"sku"`
+	PrimaryLocale            string `json:"primaryLocale"`
 	ContentRightsDeclaration string `json:"contentRightsDeclaration"`
 }
 
@@ -23,10 +23,10 @@ type AppInfo struct {
 }
 
 type AppInfoAttributes struct {
-	AppStoreState    string `json:"appStoreState"`
+	AppStoreState     string `json:"appStoreState"`
 	AppStoreAgeRating string `json:"appStoreAgeRating"`
-	BrazilAgeRating  string `json:"brazilAgeRating"`
-	KidsAgeBand      string `json:"kidsAgeBand"`
+	BrazilAgeRating   string `json:"brazilAgeRating"`
+	KidsAgeBand       string `json:"kidsAgeBand"`
 }
 
 // AppStoreVersion represents a version of an app.
@@ -50,12 +50,12 @@ type VersionLocalization struct {
 }
 
 type VersionLocalizationAttributes struct {
-	Locale       string `json:"locale"`
-	Description  string `json:"description"`
-	Keywords     string `json:"keywords"`
-	WhatsNew     string `json:"whatsNew"`
-	SupportURL   string `json:"supportUrl"`
-	MarketingURL string `json:"marketingUrl"`
+	Locale          string `json:"locale"`
+	Description     string `json:"description"`
+	Keywords        string `json:"keywords"`
+	WhatsNew        string `json:"whatsNew"`
+	SupportURL      string `json:"supportUrl"`
+	MarketingURL    string `json:"marketingUrl"`
 	PromotionalText string `json:"promotionalText"`
 }
 
@@ -66,11 +66,11 @@ type Build struct {
 }
 
 type BuildAttributes struct {
-	Version              string `json:"version"`
-	UploadedDate         string `json:"uploadedDate"`
-	ProcessingState      string `json:"processingState"`
-	MinOsVersion         string `json:"minOsVersion"`
-	UsesNonExemptEncryption *bool `json:"usesNonExemptEncryption"`
+	Version                 string `json:"version"`
+	UploadedDate            string `json:"uploadedDate"`
+	ProcessingState         string `json:"processingState"`
+	MinOsVersion            string `json:"minOsVersion"`
+	UsesNonExemptEncryption *bool  `json:"usesNonExemptEncryption"`
 }
 
 // ScreenshotSet represents a set of screenshots for a device type.
@@ -155,10 +155,10 @@ type Screenshot struct {
 }
 
 type ScreenshotAttributes struct {
-	FileSize      int    `json:"fileSize"`
-	FileName      string `json:"fileName"`
-	ImageAsset    *ImageAsset `json:"imageAsset"`
-	AssetToken    string `json:"assetToken"`
+	FileSize         int         `json:"fileSize"`
+	FileName         string      `json:"fileName"`
+	ImageAsset       *ImageAsset `json:"imageAsset"`
+	AssetToken       string      `json:"assetToken"`
 	UploadOperations interface{} `json:"uploadOperations"`
 }
 
@@ -183,11 +183,11 @@ type BetaGroup struct {
 }
 
 type BetaGroupAttributes struct {
-	Name                      string `json:"name"`
-	IsInternalGroup           bool   `json:"isInternalGroup"`
-	PublicLinkEnabled         *bool  `json:"publicLinkEnabled"`
-	PublicLinkLimitEnabled    *bool  `json:"publicLinkLimitEnabled"`
-	HasAccessToAllBuilds      *bool  `json:"hasAccessToAllBuilds"`
+	Name                   string `json:"name"`
+	IsInternalGroup        bool   `json:"isInternalGroup"`
+	PublicLinkEnabled      *bool  `json:"publicLinkEnabled"`
+	PublicLinkLimitEnabled *bool  `json:"publicLinkLimitEnabled"`
+	HasAccessToAllBuilds   *bool  `json:"hasAccessToAllBuilds"`
 }
 
 // GetBetaGroups fetches TestFlight beta groups for an app.
@@ -206,8 +206,8 @@ type AppPrice struct {
 }
 
 type AppPriceAttributes struct {
-	Manual      bool   `json:"manual"`
-	StartDate   string `json:"startDate"`
+	Manual    bool   `json:"manual"`
+	StartDate string `json:"startDate"`
 }
 
 // Territory represents an App Store territory.
@@ -231,8 +231,8 @@ func (c *Client) GetAppAvailability(appID string) ([]Territory, error) {
 
 // AppPricePoint represents a price tier.
 type AppPricePoint struct {
-	ID         string                   `json:"id"`
-	Attributes AppPricePointAttributes  `json:"attributes"`
+	ID         string                  `json:"id"`
+	Attributes AppPricePointAttributes `json:"attributes"`
 }
 
 type AppPricePointAttributes struct {

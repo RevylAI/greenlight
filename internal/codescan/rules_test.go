@@ -21,6 +21,52 @@ func tsCtx(lines ...string) FileContext {
 	return FileContext{Path: "X.ts", RelPath: "X.ts", Lines: lines, Language: "typescript"}
 }
 
+// An inline `// greenlight:ignore` directive (bare or rule-specific), on the
+// matching line or the line directly above it, suppresses the finding.
+func TestInlineIgnoreDirective(t *testing.T) {
+	r := ruleByID(t, "hardcoded-ipv4")
+
+	suppressed := []FileContext{
+		swiftCtx(`let host = "10.1.2.3" // greenlight:ignore`),                   // bare, same line
+		swiftCtx(`let host = "10.1.2.3" // greenlight:ignore hardcoded-ipv4`),    // rule-specific, same line
+		swiftCtx(`// greenlight:ignore hardcoded-ipv4`, `let host = "10.1.2.3"`), // directive on line above
+		swiftCtx(`/* greenlight:ignore */`, `let host = "10.1.2.3"`),             // block-comment bare
+	}
+	for i, ctx := range suppressed {
+		if got := r.Check(ctx); len(got) != 0 {
+			t.Errorf("case %d: expected suppression, got %d findings: %+v", i, len(got), got)
+		}
+	}
+
+	// A directive naming a different rule must NOT suppress this one; and with no
+	// directive the rule still fires.
+	if got := r.Check(swiftCtx(`let host = "10.1.2.3" // greenlight:ignore some-other-rule`)); len(got) == 0 {
+		t.Error("a directive for a different rule should not suppress this finding")
+	}
+	if got := r.Check(swiftCtx(`let host = "10.1.2.3"`)); len(got) == 0 {
+		t.Error("expected a finding when no ignore directive is present")
+	}
+
+	// A TRAILING directive on a code line must suppress only its own line, not a
+	// real finding on the line below.
+	leak := swiftCtx(
+		`let a = "10.1.2.3" // greenlight:ignore hardcoded-ipv4`,
+		`let b = "192.168.5.5"`,
+	)
+	if got := r.Check(leak); len(got) != 1 {
+		t.Errorf("trailing directive must not leak to the next line; want 1 finding, got %d: %+v", len(got), got)
+	}
+
+	// A prose comment that merely mentions the marker is not a directive.
+	prose := swiftCtx(
+		`// To silence this, add greenlight:ignore`,
+		`let host = "10.1.2.3"`,
+	)
+	if got := r.Check(prose); len(got) != 1 {
+		t.Errorf("prose mentioning the marker must not suppress; want 1 finding, got %d: %+v", len(got), got)
+	}
+}
+
 // §2.5 hardcoded-ipv4 must flag genuine IPv4 literals but not 4-part
 // version/build strings, which were previously misread as addresses.
 func TestHardcodedIPv4IgnoresVersionStrings(t *testing.T) {

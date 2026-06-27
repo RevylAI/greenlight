@@ -39,6 +39,8 @@ Get started:
 
 func SetVersion(v string) {
 	appVersion = v
+	// Enables `greenlight --version` (cobra auto-adds the flag when set).
+	rootCmd.Version = resolveVersion()
 }
 
 func Execute() error {
@@ -52,6 +54,8 @@ func init() {
 	rootCmd.SilenceUsage = true
 
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "verbose output")
+	// Match the `version` subcommand's wording ("greenlight <v>") for `--version`.
+	rootCmd.SetVersionTemplate("greenlight {{.Version}}\n")
 
 	rootCmd.AddCommand(scanCmd)
 	rootCmd.AddCommand(authCmd)

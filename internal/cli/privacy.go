@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/RevylAI/greenlight/internal/privacy"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 

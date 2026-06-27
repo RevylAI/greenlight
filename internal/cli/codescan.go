@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/RevylAI/greenlight/internal/codescan"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 

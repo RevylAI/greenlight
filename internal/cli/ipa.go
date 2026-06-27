@@ -5,8 +5,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/RevylAI/greenlight/internal/ipa"
+	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
 

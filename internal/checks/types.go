@@ -4,9 +4,9 @@ package checks
 type Severity int
 
 const (
-	SeverityInfo Severity = iota // Best practice recommendation
-	SeverityWarn                 // High risk of rejection
-	SeverityBlock                // Will almost certainly be rejected
+	SeverityInfo  Severity = iota // Best practice recommendation
+	SeverityWarn                  // High risk of rejection
+	SeverityBlock                 // Will almost certainly be rejected
 )
 
 func (s Severity) String() string {
@@ -52,10 +52,10 @@ type Results struct {
 
 // Summary provides aggregate counts.
 type Summary struct {
-	Total  int `json:"total"`
-	Blocks int `json:"blocks"`
-	Warns  int `json:"warns"`
-	Infos  int `json:"infos"`
+	Total  int  `json:"total"`
+	Blocks int  `json:"blocks"`
+	Warns  int  `json:"warns"`
+	Infos  int  `json:"infos"`
 	Passed bool `json:"passed"` // true if zero BLOCKs
 }
 
