@@ -30,6 +30,10 @@ type Result struct {
 	Summary     Summary   `json:"summary"`
 	Elapsed     time.Duration `json:"elapsed"`
 
+	// Incomplete is true when a requested sub-scanner failed to run, so the
+	// results may be partial. CI gating (--exit-code) treats this as a failure.
+	Incomplete bool `json:"incomplete,omitempty"`
+
 	// Extra context from sub-scanners
 	AppName        string   `json:"app_name,omitempty"`
 	BundleID       string   `json:"bundle_id,omitempty"`
@@ -175,6 +179,7 @@ func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
 	// as a warning (appended after dedup so distinct failures aren't collapsed)
 	// so a crashed scanner can't masquerade as a clean "no issues found".
 	for err := range errs {
+		result.Incomplete = true
 		result.Findings = append(result.Findings, Finding{
 			Source:   "scan",
 			Severity: "WARN",

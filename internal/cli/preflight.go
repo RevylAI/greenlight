@@ -196,7 +196,9 @@ func preflightExit(result *preflight.Result, vres *verify.Result) error {
 	if !preflightExitCode {
 		return nil
 	}
-	fail := result.Summary.Critical > 0 || result.Summary.High > 0
+	// Critical/High findings, an incomplete scan (a requested scanner crashed),
+	// or a failed runtime flow all fail the gate.
+	fail := result.Summary.Critical > 0 || result.Summary.High > 0 || result.Incomplete
 	if vres != nil && !vres.Summary.Passed {
 		fail = true
 	}
