@@ -259,6 +259,24 @@ func AllRules() []Rule {
 			},
 		},
 		&PatternRule{
+			id:        "uiwebview-removed",
+			title:     "UIWebView is no longer accepted",
+			guideline: "2.5.1",
+			severity:  SeverityCritical,
+			detail:    "Apple stopped accepting apps and updates that use the deprecated UIWebView API. Its presence is a hard rejection.",
+			fix:       "Migrate to WKWebView.",
+			languages: []string{"swift", "objc"},
+			patterns: []*regexp.Regexp{
+				// Require a real usage context (call, ObjC pointer, type position,
+				// or the Delegate protocol). codeOnly below also blanks string
+				// literals + comments so a textual mention can't trip this CRITICAL.
+				regexp.MustCompile(`\bUIWebView\s*[(*]`), // UIWebView(  /  UIWebView *
+				regexp.MustCompile(`\bUIWebViewDelegate\b`),
+				regexp.MustCompile(`[:\[]\s*UIWebView\b`), // : UIWebView  /  [UIWebView
+			},
+			codeOnly: true,
+		},
+		&PatternRule{
 			id:        "vague-purpose-string",
 			title:     "Vague permission purpose string",
 			guideline: "5.1.1",
@@ -280,6 +298,9 @@ func AllRules() []Rule {
 		&ExpoConfigRule{
 			id: "expo-config-check",
 		},
+		&ExportComplianceRule{
+			id: "export-compliance",
+		},
 	}
 }
 
@@ -298,6 +319,7 @@ type PatternRule struct {
 	ignorePatterns     []*regexp.Regexp // Lines matching these are skipped
 	countThreshold     int              // Only report if count exceeds this
 	firstMatchOnly     bool             // Project-level fact: cap to one per file; scanner collapses to one per project
+	codeOnly           bool             // Strip string literals + comments before matching (for rules that must not fire on text)
 }
 
 func (r *PatternRule) RuleID() string { return r.id }
@@ -348,8 +370,15 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 			continue
 		}
 
+		// codeOnly rules match against a copy with string literals and comments
+		// blanked out, so a mention in text (e.g. "use UIWebView()") doesn't fire.
+		matchLine := line
+		if r.codeOnly {
+			matchLine = stripStringsAndComments(line)
+		}
+
 		for _, pattern := range r.patterns {
-			if pattern.MatchString(line) {
+			if pattern.MatchString(matchLine) {
 				findings = append(findings, Finding{
 					Severity:  r.severity,
 					Guideline: r.guideline,
@@ -377,6 +406,45 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 	}
 
 	return findings
+}
+
+// stripStringsAndComments blanks out the contents of "..."/'...' string literals
+// and removes // line comments and /* */ block comments, so codeOnly rules match
+// only real code. It's a lightweight scan (no escaped-quote handling), which is
+// enough to keep call-shaped text like "UIWebView()" out of the match.
+func stripStringsAndComments(line string) string {
+	var b strings.Builder
+	b.Grow(len(line))
+	inStr := false
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inStr {
+			b.WriteByte(' ')
+			if c == quote {
+				inStr = false
+			}
+			continue
+		}
+		switch {
+		case c == '"' || c == '\'' || c == '`':
+			inStr = true
+			quote = c
+			b.WriteByte(' ')
+		case c == '/' && i+1 < len(line) && line[i+1] == '/':
+			return b.String() // rest of the line is a comment
+		case c == '/' && i+1 < len(line) && line[i+1] == '*':
+			end := strings.Index(line[i+2:], "*/")
+			if end < 0 {
+				return b.String() // unterminated block comment
+			}
+			i += end + 3 // skip past the closing */
+			b.WriteByte(' ')
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // PlistKeyRule checks Info.plist for required privacy keys when certain frameworks are detected.
@@ -482,4 +550,50 @@ func (r *ExpoConfigRule) Check(fc FileContext) []Finding {
 	}
 
 	return findings
+}
+
+// expoKeyRE matches the unquoted `expo:` key used in app.config.js / app.config.ts
+// (app.json uses the quoted "expo" form).
+var expoKeyRE = regexp.MustCompile(`\bexpo\s*:`)
+
+// ExportComplianceRule flags an Info.plist or Expo config that does not declare
+// encryption export compliance. Without it, App Store Connect prompts for export
+// compliance on every single upload.
+type ExportComplianceRule struct {
+	id string
+}
+
+func (r *ExportComplianceRule) Applies(fc FileContext) bool {
+	if fc.Language == "plist" && strings.HasSuffix(strings.ToLower(fc.RelPath), "info.plist") {
+		return true
+	}
+	// Match the Expo config files by exact name, not a trimmed basename — source
+	// like App.tsx / app.js also collapses to "app" and would false-positive.
+	switch strings.ToLower(filepath.Base(fc.RelPath)) {
+	case "app.json", "app.config.js", "app.config.ts":
+		return true
+	}
+	return false
+}
+
+func (r *ExportComplianceRule) Check(fc FileContext) []Finding {
+	content := strings.Join(fc.Lines, "\n")
+	// Already declared — Info.plist uses ITSAppUsesNonExemptEncryption; Expo
+	// app.json uses ios.config.usesNonExemptEncryption.
+	if strings.Contains(content, "ITSAppUsesNonExemptEncryption") ||
+		strings.Contains(content, "usesNonExemptEncryption") {
+		return nil
+	}
+	// For Expo configs, only flag a file that actually defines an app. app.json
+	// uses the quoted "expo" key; app.config.js/ts use an unquoted `expo:`.
+	if fc.Language != "plist" && !strings.Contains(content, `"expo"`) && !expoKeyRE.MatchString(content) {
+		return nil
+	}
+	return []Finding{{
+		Severity: SeverityInfo,
+		Title:    "No encryption export-compliance declaration",
+		Detail:   "Without an export-compliance declaration, App Store Connect asks about export compliance on every upload.",
+		Fix:      "Set ITSAppUsesNonExemptEncryption in Info.plist (or ios.config.usesNonExemptEncryption in app.json): false if you only use exempt encryption like HTTPS, true (with documentation) otherwise.",
+		File:     fc.RelPath,
+	}}
 }

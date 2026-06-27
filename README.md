@@ -67,6 +67,7 @@ Scans Swift, Objective-C, React Native, and Expo projects for:
 - External payment for digital goods (§3.1.1) — **CRITICAL**
 - Dynamic code execution (§2.5.2) — **CRITICAL**
 - Cryptocurrency mining (§3.1.5) — **CRITICAL**
+- UIWebView (removed API, hard rejection) (§2.5.1) — **CRITICAL**
 - Missing Sign in with Apple when using social login (§4.8)
 - Missing Restore Purchases for IAP (§3.1.1)
 - Missing ATT for ad/tracking SDKs (§5.1.2)
@@ -76,6 +77,7 @@ Scans Swift, Objective-C, React Native, and Expo projects for:
 - Hardcoded IPv4 addresses (§2.5)
 - Insecure HTTP URLs (§1.6)
 - Vague Info.plist purpose strings (§5.1.1)
+- Missing encryption export-compliance declaration
 - Expo config issues (§2.1)
 
 ### `greenlight privacy [path]` — Privacy manifest validator

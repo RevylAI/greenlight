@@ -32,6 +32,7 @@ Checks for:
   • Hardcoded secrets (CRITICAL)
   • External payment for digital goods (CRITICAL)
   • Dynamic code execution (CRITICAL)
+  • UIWebView, a removed API (CRITICAL)
   • Missing Sign in with Apple when using social login
   • Missing Restore Purchases for IAP
   • Missing ATT for ad/tracking SDKs
@@ -41,6 +42,7 @@ Checks for:
   • Hardcoded IPv4 addresses
   • Insecure HTTP URLs
   • Vague Info.plist purpose strings
+  • Missing encryption export-compliance declaration
   • Expo config issues`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runCodescan,
