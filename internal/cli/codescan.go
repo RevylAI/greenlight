@@ -9,9 +9,12 @@ import (
 	"time"
 
 	"github.com/RevylAI/greenlight/internal/codescan"
+	"github.com/RevylAI/greenlight/internal/sarif"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
+
+const greenlightInfoURI = "https://github.com/RevylAI/greenlight"
 
 var (
 	codescanPath   string
@@ -49,7 +52,7 @@ Checks for:
 }
 
 func init() {
-	codescanCmd.Flags().StringVar(&codescanFormat, "format", "terminal", "output format: terminal, json")
+	codescanCmd.Flags().StringVar(&codescanFormat, "format", "terminal", "output format: terminal, json, sarif")
 	codescanCmd.Flags().StringVar(&codescanOutput, "output", "", "write report to file (stdout if omitted)")
 	rootCmd.AddCommand(codescanCmd)
 }
@@ -69,10 +72,13 @@ func runCodescan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path must be a directory: %s", path)
 	}
 
-	// Banner
-	purple.Println("\n  greenlight codescan — find rejection risks in your code.")
-	fmt.Printf("  Scanning: %s\n", path)
-	fmt.Printf("  Format:   %s\n\n", codescanFormat)
+	// Banner (suppressed for machine formats so stdout stays valid JSON/SARIF).
+	format := strings.ToLower(codescanFormat)
+	if format != "json" && format != "sarif" {
+		purple.Println("\n  greenlight codescan — find rejection risks in your code.")
+		fmt.Printf("  Scanning: %s\n", path)
+		fmt.Printf("  Format:   %s\n\n", codescanFormat)
+	}
 
 	// Run scan
 	start := time.Now()
@@ -103,12 +109,29 @@ func runCodescan(cmd *cobra.Command, args []string) error {
 		output = os.Stdout
 	}
 
-	switch strings.ToLower(codescanFormat) {
+	switch format {
 	case "json":
 		return writeCodescanJSON(output, findings, elapsed)
+	case "sarif":
+		return writeCodescanSARIF(output, findings)
 	default:
 		return writeCodescanTerminal(output, findings, elapsed)
 	}
+}
+
+func writeCodescanSARIF(w *os.File, findings []codescan.Finding) error {
+	sf := make([]sarif.Finding, 0, len(findings))
+	for _, f := range findings {
+		sf = append(sf, sarif.Finding{
+			Severity:  f.Severity.String(),
+			Title:     f.Title,
+			Detail:    f.Detail,
+			Guideline: f.Guideline,
+			File:      f.File,
+			Line:      f.Line,
+		})
+	}
+	return sarif.Write(w, "greenlight", appVersion, greenlightInfoURI, sf)
 }
 
 func writeCodescanTerminal(w *os.File, findings []codescan.Finding, elapsed time.Duration) error {
