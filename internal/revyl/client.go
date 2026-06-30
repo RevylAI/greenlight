@@ -19,7 +19,7 @@ import (
 // Onboarding constants for the Revyl activation funnel — surfaced when a
 // greenlight user reaches the runtime tier without a Revyl account.
 const (
-	SignupURL  = "https://app.revyl.ai/signup"
+	SignupURL  = "https://app.revyl.ai/signup?utm_source=greenlight&utm_medium=cli&utm_campaign=verify"
 	InstallCmd = "curl -fsSL https://revyl.com/install.sh | sh"
 	LoginCmd   = "revyl auth login"
 )
