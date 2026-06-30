@@ -1,26 +1,27 @@
 {
   "name": "greenlight",
-  "owner": {
-    "name": "revylai"
+  "displayName": "Greenlight — App Store Pre-Submission Scanner",
+  "description": "Run ALL App Store compliance checks in one command — code patterns, privacy manifests, IPA binaries, metadata. Catches rejections before you submit. Claude Code integration: run, fix, re-run until GREENLIT.",
+  "version": "0.1.0",
+  "author": {
+    "name": "revylai",
+    "url": "https://revyl.com"
   },
-  "plugins": [
-    {
-      "name": "greenlight",
-      "source": "../",
-      "category": "compliance",
-      "tags": [
-        "apple",
-        "app-store",
-        "review",
-        "guidelines",
-        "ios",
-        "swift",
-        "react-native",
-        "expo",
-        "rejection",
-        "compliance"
-      ],
-      "strict": true
-    }
+  "homepage": "https://github.com/RevylAI/greenlight",
+  "repository": "https://github.com/RevylAI/greenlight",
+  "license": "MIT",
+  "keywords": [
+    "app store review",
+    "app store rejection",
+    "app store compliance",
+    "app store guidelines",
+    "submit to app store",
+    "ios submission",
+    "app review preparation",
+    "preflight check",
+    "pre-submission scan",
+    "greenlight",
+    "privacy manifest",
+    "app store ready"
   ]
 }
