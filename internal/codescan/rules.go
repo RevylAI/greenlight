@@ -8,7 +8,7 @@ import (
 
 // AllRules returns every registered code scan rule.
 func AllRules() []Rule {
-	return []Rule{
+	rules := []Rule{
 		// CRITICAL - Immediate rejection
 		&PatternRule{
 			id:        "private-api",
@@ -302,6 +302,11 @@ func AllRules() []Rule {
 			id: "export-compliance",
 		},
 	}
+
+	// Crypto apps carry App Review obligations (Guideline 3.1.5(b)) that a code
+	// scan can detect but not verify — organization enrollment, exchange
+	// licensing, a legal opinion. Append those advisories last.
+	return append(rules, cryptoComplianceRules()...)
 }
 
 // PatternRule matches regex patterns against file lines.

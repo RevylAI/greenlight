@@ -198,11 +198,36 @@
             {
               "section": "3.1.5",
               "title": "Cryptocurrency",
-              "content": "Apps may facilitate cryptocurrency transactions but must not mine cryptocurrency on device.",
+              "content": "Apps may facilitate cryptocurrency transactions but must not mine cryptocurrency on the device, and crypto wallet and exchange apps carry organization-enrollment and licensing obligations.",
               "common_violations": [
                 "On-device cryptocurrency mining",
                 "ICO/token offerings without proper compliance",
                 "Crypto wallets without proper security measures"
+              ],
+              "subsections": [
+                {
+                  "section": "3.1.5(b)(i)",
+                  "title": "Cryptocurrency Wallets",
+                  "content": "Apps may facilitate virtual currency storage, provided they are offered by developers enrolled as an organization. Wallet apps published from an Individual Apple Developer account are rejected.",
+                  "common_violations": [
+                    "Publishing a crypto wallet from an Individual developer account instead of an Organization account"
+                  ]
+                },
+                {
+                  "section": "3.1.5(b)(ii)",
+                  "title": "Cryptocurrency Mining",
+                  "content": "Apps may not mine for cryptocurrencies unless the processing is performed off device (e.g. cloud-based mining)."
+                },
+                {
+                  "section": "3.1.5(b)(iii)",
+                  "title": "Cryptocurrency Exchanges",
+                  "content": "Apps may facilitate transactions or transmissions of cryptocurrency on an approved exchange, provided they are offered by the exchange itself, or an approved organization in compliance with all applicable law, in the regions or countries where the app is available. This covers custody, fiat on-ramp and off-ramp, and peer-to-peer trading. App Review commonly requests money-transmission/VASP licensing evidence or a legal opinion, geo-restricted availability, and a working demo account before approving these apps.",
+                  "common_violations": [
+                    "Facilitating a crypto exchange or fiat on/off-ramp without licensing evidence or a legal opinion for the territories where the app ships",
+                    "Offering the app in regions where the operator is not licensed to provide the service",
+                    "Submitting without a working demo account for the reviewer to exercise the exchange flow"
+                  ]
+                }
               ]
             }
           ]
