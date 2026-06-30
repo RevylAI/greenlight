@@ -1,6 +1,9 @@
 package codescan
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func jsonCtx(lines ...string) FileContext {
 	return FileContext{Path: "package.json", RelPath: "package.json", Lines: lines, Language: "json"}
@@ -50,6 +53,8 @@ func TestCryptoExchangeLicensing(t *testing.T) {
 	fire := []FileContext{
 		jsonCtx(`    "@moonpay/react-native-moonpay-sdk": "1.0.0",`),
 		jsonCtx(`    "transak-react-native-sdk": "1.0.0",`),
+		jsonCtx(`    "@ramp-network/ramp-instant-sdk": "4.0.0",`), // scoped pkg with /subpath
+		jsonCtx(`    "@sardine/react-native": "1.0.0",`),
 		tsCtx(`export const FIAT_ON_RAMP_URL = "https://onramp.example";`),
 		tsCtx(`const title = "Crypto exchange";`),
 		tsCtx(`function buyCrypto() {}`),
@@ -101,4 +106,19 @@ func TestCryptoAdvisoryRespectsIgnoreDirective(t *testing.T) {
 	if got := r.Check(ctx); len(got) != 0 {
 		t.Errorf("expected the ignore directive to suppress the advisory, got %+v", got)
 	}
+
+	// The space-separated form (recommended in the fix text) is the one the
+	// scanner actually honors; the bracketed form is NOT a valid directive, so
+	// the fix strings must not tell users to type it.
+	for _, ruleID := range []string{"crypto-wallet-org-account", "crypto-exchange-licensing"} {
+		fix := ruleByID(t, ruleID).fix
+		if want := "greenlight:ignore " + ruleID; !contains(fix, want) {
+			t.Errorf("%s fix text should recommend %q (the supported syntax); got %q", ruleID, want, fix)
+		}
+		if contains(fix, "greenlight:ignore["+ruleID+"]") {
+			t.Errorf("%s fix text uses the bracketed directive form, which the scanner does not honor", ruleID)
+		}
+	}
 }
+
+func contains(s, sub string) bool { return strings.Contains(s, sub) }

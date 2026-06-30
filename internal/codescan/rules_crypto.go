@@ -16,7 +16,7 @@ import "regexp"
 // Both rules are firstMatchOnly (one finding per project — a crypto app is a
 // project-level fact) and carry no antiPatterns, because the obligation cannot
 // be discharged in source. A team that has handled it silences the reminder
-// with an inline `// greenlight:ignore[<rule-id>]` directive.
+// with an inline `// greenlight:ignore <rule-id>` directive.
 func cryptoComplianceRules() []Rule {
 	return []Rule{
 		// WARN — a wallet/web3 integration is permitted, but only from an
@@ -28,7 +28,7 @@ func cryptoComplianceRules() []Rule {
 			guideline: "3.1.5",
 			severity:  SeverityWarn,
 			detail:    "Crypto wallet / web3 functionality detected. Guideline 3.1.5(b)(i): apps that facilitate virtual currency storage must be published by a developer enrolled as an Organization — Individual Apple Developer accounts are rejected. This is a process requirement a code scan cannot verify.",
-			fix:       "Confirm the app ships under an Organization account. If it also lets users buy, sell, exchange, or transmit crypto (including fiat on/off-ramp), the heavier 3.1.5(b)(iii) requirements apply — see the crypto-exchange-licensing finding. Once confirmed, silence with `// greenlight:ignore[crypto-wallet-org-account]`.",
+			fix:       "Confirm the app ships under an Organization account. If it also lets users buy, sell, exchange, or transmit crypto (including fiat on/off-ramp), the heavier 3.1.5(b)(iii) requirements apply — see the crypto-exchange-licensing finding. Once confirmed, silence with `// greenlight:ignore crypto-wallet-org-account`.",
 			languages: []string{"json", "typescript", "javascript", "swift", "objc"},
 			patterns: []*regexp.Regexp{
 				// Wallet / web3 SDKs as a quoted dependency key (package.json) or
@@ -49,11 +49,14 @@ func cryptoComplianceRules() []Rule {
 			guideline: "3.1.5",
 			severity:  SeverityHigh,
 			detail:    "Crypto exchange, fiat on/off-ramp, or transmission functionality detected. Guideline 3.1.5(b)(iii): this is permitted only by the licensed exchange itself or an approved organization, in compliance with all applicable laws in every region the app is offered. App Review's crypto team routinely requests — via Resolution Center — money-transmission/VASP licensing evidence OR a legal opinion that licensing is not required, geo-restricted availability, and a working demo account. None of this can be verified by static analysis.",
-			fix:       "Before submitting: (1) confirm an Organization Apple account; (2) prepare per-territory licensing documents or a counsel legal opinion mapped to 3.1.5(b)(iii) and Guideline 5.0; (3) geo-restrict App Store availability to authorized territories and gate sanctioned regions in-app; (4) provide a funded demo account and compliance notes in App Review notes. Once handled, silence with `// greenlight:ignore[crypto-exchange-licensing]`.",
+			fix:       "Before submitting: (1) confirm an Organization Apple account; (2) prepare per-territory licensing documents or a counsel legal opinion mapped to 3.1.5(b)(iii) and Guideline 5.0; (3) geo-restrict App Store availability to authorized territories and gate sanctioned regions in-app; (4) provide a funded demo account and compliance notes in App Review notes. Once handled, silence with `// greenlight:ignore crypto-exchange-licensing`.",
 			languages: []string{"json", "typescript", "javascript", "swift", "objc"},
 			patterns: []*regexp.Regexp{
 				// Fiat on/off-ramp and exchange-provider SDKs as a quoted token.
-				regexp.MustCompile(`(?i)['"](@?moonpay[\w/-]*|@?transak[\w/-]*|onramper|@?ramp-network|ramp-network|banxa|mercuryo|@sardine[\w/-]*|@?wyre[\w/-]*)['"]`),
+				// Every provider allows an optional scope/subpath so scoped SDK
+				// packages match too (e.g. "@ramp-network/ramp-instant-sdk",
+				// "@moonpay/react-native-moonpay-sdk", "transak-react-native-sdk").
+				regexp.MustCompile(`(?i)['"]@?(moonpay|transak|ramp-network|onramper|banxa|mercuryo|sardine|wyre)[\w/.-]*['"]`),
 				// Exchange / ramp / P2P domain phrases in user copy or identifiers.
 				// Hyphen/underscore/camel only for "on/off ramp" so a freeway
 				// "on ramp" sentence can't trip a HIGH finding.
