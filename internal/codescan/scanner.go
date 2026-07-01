@@ -208,7 +208,7 @@ func detectLanguage(path string) string {
 	switch ext {
 	case ".swift":
 		return "swift"
-	case ".m", ".h":
+	case ".m", ".h", ".mm":
 		return "objc"
 	case ".ts", ".tsx":
 		return "typescript"

@@ -9,18 +9,33 @@ func jsonCtx(lines ...string) FileContext {
 	return FileContext{Path: "package.json", RelPath: "package.json", Lines: lines, Language: "json"}
 }
 
-// A wallet/web3 SDK in dependencies or imports triggers the 3.1.5(b)(i)
-// Organization-account reminder; unrelated dependencies do not.
+func objcCtx(lines ...string) FileContext {
+	return FileContext{Path: "X.mm", RelPath: "X.mm", Lines: lines, Language: "objc"}
+}
+
+// A wallet/web3 SDK in dependencies or imports triggers the WARN
+// Organization-account reminder; unrelated deps and bare identifiers do not.
 func TestCryptoWalletOrgAccount(t *testing.T) {
 	r := ruleByID(t, "crypto-wallet-org-account")
+	if r.severity != SeverityWarn {
+		t.Fatalf("crypto-wallet-org-account should be WARN, got %s", r.severity)
+	}
 
 	fire := []FileContext{
 		jsonCtx(`    "ethers": "^6.13.0",`),
 		jsonCtx(`    "@privy-io/expo": "0.0.0",`),
 		jsonCtx(`    "@reown/appkit-wagmi-react-native": "1.0.0",`),
+		jsonCtx(`    "@wagmi/core": "2.0.0",`),           // scoped form (reviewer coverage gap)
+		jsonCtx(`    "@ethersproject/contracts": "5.0"`), // scoped ethers
+		jsonCtx(`    "@coinbase/wallet-sdk": "4.0.0",`),
+		jsonCtx(`    "@rainbow-me/rainbowkit": "2.0.0",`),
+		jsonCtx(`    "thirdweb": "5.0.0",`),
+		jsonCtx(`    "@web3-onboard/core": "2.0.0",`),
 		tsCtx(`import { createWalletClient } from "viem";`),
 		tsCtx(`import { Connection } from "@solana/web3.js";`),
 		tsCtx(`import { useAccount } from 'wagmi/actions';`),
+		swiftCtx(`import WalletCore`),
+		objcCtx(`#import <WalletCore/WalletCore.h>`),
 	}
 	for i, ctx := range fire {
 		if got := r.Check(ctx); len(got) == 0 {
@@ -32,49 +47,96 @@ func TestCryptoWalletOrgAccount(t *testing.T) {
 		jsonCtx(`    "web3modal-legacy-unrelated": "1.0.0",`), // quotes bound the token: web3 != web3modal...
 		jsonCtx(`    "react-native": "0.83.6",`),
 		tsCtx(`import axios from "axios";`),
-		tsCtx(`const etherealMessage = "hello";`), // "ethers" must be the whole quoted token
+		tsCtx(`const etherealMessage = "hello";`),              // "ethers" must be the whole quoted token
+		swiftCtx(`let pass = WalletCore.makeApplePass()`),      // bare WalletCore identifier (Apple Wallet) — needs `import`
+		swiftCtx(`// see WalletCore for the Trust Wallet lib`), // prose mention
 	}
 	for i, ctx := range noFire {
 		if got := r.Check(ctx); len(got) != 0 {
 			t.Errorf("no-fire case %d: expected no finding for %q, got %+v", i, ctx.Lines[0], got)
 		}
 	}
-
-	if got := r.Check(jsonCtx(`    "ethers": "^6.13.0",`)); len(got) > 0 && got[0].Severity != SeverityWarn {
-		t.Errorf("crypto-wallet-org-account should be WARN, got %s", got[0].Severity)
-	}
 }
 
-// Exchange / fiat on-off-ramp / P2P signals trigger the 3.1.5(b)(iii)
-// licensing/legal-opinion HIGH advisory.
-func TestCryptoExchangeLicensing(t *testing.T) {
-	r := ruleByID(t, "crypto-exchange-licensing")
+// The HIGH exchange-SDK rule fires only on real provider package identifiers
+// (scoped or -suffixed), never on bare words — so it can't fail a non-crypto
+// app's `preflight --exit-code`.
+func TestCryptoExchangeSDK(t *testing.T) {
+	r := ruleByID(t, "crypto-exchange-sdk")
+	if r.severity != SeverityHigh {
+		t.Fatalf("crypto-exchange-sdk should be HIGH, got %s", r.severity)
+	}
 
 	fire := []FileContext{
 		jsonCtx(`    "@moonpay/react-native-moonpay-sdk": "1.0.0",`),
 		jsonCtx(`    "transak-react-native-sdk": "1.0.0",`),
 		jsonCtx(`    "@ramp-network/ramp-instant-sdk": "4.0.0",`), // scoped pkg with /subpath
-		jsonCtx(`    "@sardine/react-native": "1.0.0",`),
-		tsCtx(`export const FIAT_ON_RAMP_URL = "https://onramp.example";`),
-		tsCtx(`const title = "Crypto exchange";`),
-		tsCtx(`function buyCrypto() {}`),
-		tsCtx(`const tab = "p2p-trading";`),
+		jsonCtx(`    "@sardine-ai/react-native-sardine": "1.0.0",`),
+		jsonCtx(`    "@transak/transak-sdk": "3.0.0",`),
 	}
 	for i, ctx := range fire {
 		got := r.Check(ctx)
 		if len(got) == 0 {
-			t.Errorf("fire case %d: expected a finding for %q", i, ctx.Lines[0])
+			t.Errorf("fire case %d: expected a HIGH finding for %q", i, ctx.Lines[0])
 			continue
 		}
 		if got[0].Severity != SeverityHigh {
-			t.Errorf("fire case %d: crypto-exchange-licensing should be HIGH, got %s", i, got[0].Severity)
+			t.Errorf("fire case %d: want HIGH, got %s", i, got[0].Severity)
 		}
 	}
 
+	// Reviewer's blocking false positives: bare words that merely start with a
+	// provider name must NOT trip the HIGH rule.
 	noFire := []FileContext{
-		tsCtx(`// take the highway on ramp to the bridge`), // comment line, and spaced "on ramp"
-		tsCtx(`const note = "merge onto the on ramp";`),    // spaced "on ramp" is not on-ramp/onramp
+		jsonCtx(`  "ingredients": ["sardine", "sardines", "tuna"],`),
+		tsCtx(`const fish = "sardine";`),
+		tsCtx(`const a = "wyred"; const b = "moonpayments"; const c = "banxample";`),
+		jsonCtx(`    "moonshot-ui": "1.0.0",`),
+		tsCtx(`const note = "This app is not a crypto exchange and does not buy crypto";`),
 		jsonCtx(`    "react-query": "5.0.0",`),
+	}
+	for i, ctx := range noFire {
+		if got := r.Check(ctx); len(got) != 0 {
+			t.Errorf("no-fire case %d: expected NO HIGH finding for %q, got %+v", i, ctx.Lines[0], got)
+		}
+	}
+}
+
+// The WARN signals rule catches loose exchange/on-ramp phrases, skips obvious
+// negations, and requires a real separator on the ramp phrase.
+func TestCryptoExchangeSignals(t *testing.T) {
+	r := ruleByID(t, "crypto-exchange-signals")
+	if r.severity != SeverityWarn {
+		t.Fatalf("crypto-exchange-signals should be WARN (must not fail --exit-code), got %s", r.severity)
+	}
+
+	fire := []FileContext{
+		tsCtx(`const title = "Crypto exchange";`),
+		tsCtx(`const t = "cryptocurrency exchange";`),
+		tsCtx(`function buyCrypto() {}`),
+		tsCtx(`const cta = "Trade crypto";`),
+		tsCtx(`const u = "fiat on-ramp";`),
+		tsCtx(`const tab = "p2p-trading";`),
+		tsCtx(`const link = "take the on-ramp to Coinbase";`), // separator present
+	}
+	for i, ctx := range fire {
+		got := r.Check(ctx)
+		if len(got) == 0 {
+			t.Errorf("fire case %d: expected a WARN finding for %q", i, ctx.Lines[0])
+			continue
+		}
+		if got[0].Severity != SeverityWarn {
+			t.Errorf("fire case %d: want WARN, got %s", i, got[0].Severity)
+		}
+	}
+
+	// Non-comment lines that exercise the regex and must NOT fire.
+	noFire := []FileContext{
+		tsCtx(`const s = "take the next onramp";`),                           // bare onramp, no separator (ride-share)
+		tsCtx(`const s = "merge onto the highway offramp soon";`),            // bare offramp
+		tsCtx(`const d = "This app is not a crypto exchange";`),              // negation
+		tsCtx(`const d = "we do not buy crypto or bitcoin on your behalf";`), // negation
+		tsCtx(`const x = "sardines and tuna";`),
 	}
 	for i, ctx := range noFire {
 		if got := r.Check(ctx); len(got) != 0 {
@@ -83,42 +145,45 @@ func TestCryptoExchangeLicensing(t *testing.T) {
 	}
 }
 
-// Both crypto advisories are project-level facts: one finding per project even
-// when many files match.
-func TestCryptoRulesCollapseToOnePerProject(t *testing.T) {
-	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-licensing"} {
+// All three crypto advisories are project-level facts: firstMatchOnly, no
+// antiPatterns.
+func TestCryptoRulesShape(t *testing.T) {
+	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-sdk", "crypto-exchange-signals"} {
 		r := ruleByID(t, id)
 		if !r.firstMatchOnly {
 			t.Errorf("%s should be firstMatchOnly so it reports once per project", id)
 		}
-		// No antiPatterns: the obligation can't be discharged in source.
 		if len(r.antiPatterns) != 0 {
 			t.Errorf("%s should have no antiPatterns (cannot be fixed in code)", id)
 		}
+		// Only crypto-exchange-sdk is allowed to be HIGH (it gates CI); the others
+		// must stay WARN so non-crypto false positives never fail --exit-code.
+		if id != "crypto-exchange-sdk" && r.severity == SeverityHigh {
+			t.Errorf("%s must not be HIGH", id)
+		}
 	}
 }
 
-// An inline ignore directive lets a team that has handled the obligation
-// silence the advisory.
-func TestCryptoAdvisoryRespectsIgnoreDirective(t *testing.T) {
-	r := ruleByID(t, "crypto-exchange-licensing")
-	ctx := tsCtx(`const title = "Crypto exchange"; // greenlight:ignore crypto-exchange-licensing`)
+// Fix text must recommend the supported space-form directive and, since these
+// fire on package.json, the .greenlight.yml suppression path — never the
+// bracketed form the scanner does not honor.
+func TestCryptoFixTextSuppressionSyntax(t *testing.T) {
+	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-sdk", "crypto-exchange-signals"} {
+		fix := ruleByID(t, id).fix
+		if strings.Contains(fix, "greenlight:ignore["+id+"]") {
+			t.Errorf("%s fix uses the bracketed directive form, which the scanner does not honor", id)
+		}
+		if !strings.Contains(fix, ".greenlight.yml") {
+			t.Errorf("%s fix should point to .greenlight.yml (package.json hits can't carry an inline directive)", id)
+		}
+	}
+}
+
+// An inline ignore directive silences a code-line hit for the WARN phrase rule.
+func TestCryptoSignalsRespectsIgnoreDirective(t *testing.T) {
+	r := ruleByID(t, "crypto-exchange-signals")
+	ctx := tsCtx(`const title = "Crypto exchange"; // greenlight:ignore crypto-exchange-signals`)
 	if got := r.Check(ctx); len(got) != 0 {
 		t.Errorf("expected the ignore directive to suppress the advisory, got %+v", got)
 	}
-
-	// The space-separated form (recommended in the fix text) is the one the
-	// scanner actually honors; the bracketed form is NOT a valid directive, so
-	// the fix strings must not tell users to type it.
-	for _, ruleID := range []string{"crypto-wallet-org-account", "crypto-exchange-licensing"} {
-		fix := ruleByID(t, ruleID).fix
-		if want := "greenlight:ignore " + ruleID; !contains(fix, want) {
-			t.Errorf("%s fix text should recommend %q (the supported syntax); got %q", ruleID, want, fix)
-		}
-		if contains(fix, "greenlight:ignore["+ruleID+"]") {
-			t.Errorf("%s fix text uses the bracketed directive form, which the scanner does not honor", ruleID)
-		}
-	}
 }
-
-func contains(s, sub string) bool { return strings.Contains(s, sub) }

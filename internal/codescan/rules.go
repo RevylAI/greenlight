@@ -384,7 +384,7 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 
 		for _, pattern := range r.patterns {
 			if pattern.MatchString(matchLine) {
-				// Honor an inline `// greenlight:ignore[ rule-id]` directive on the
+				// Honor an inline `// greenlight:ignore <rule-id>` directive on the
 				// matching line or the line directly above it.
 				if suppressedByIgnore(fc.Lines, lineNum, r.id) {
 					break

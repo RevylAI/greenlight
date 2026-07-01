@@ -198,7 +198,7 @@
             {
               "section": "3.1.5",
               "title": "Cryptocurrency",
-              "content": "Apps may facilitate cryptocurrency transactions but must not mine cryptocurrency on the device, and crypto wallet and exchange apps carry organization-enrollment and licensing obligations.",
+              "content": "Apps may facilitate cryptocurrency transactions but must not mine cryptocurrency on the device. Wallet, exchange, and ICO apps have additional requirements under the 3.1.5(b) bullets below.",
               "common_violations": [
                 "On-device cryptocurrency mining",
                 "ICO/token offerings without proper compliance",
@@ -206,27 +206,32 @@
               ],
               "subsections": [
                 {
-                  "section": "3.1.5(b)(i)",
+                  "section": "3.1.5(b) Wallets",
                   "title": "Cryptocurrency Wallets",
-                  "content": "Apps may facilitate virtual currency storage, provided they are offered by developers enrolled as an organization. Wallet apps published from an Individual Apple Developer account are rejected.",
+                  "content": "Apple's wording: apps may facilitate virtual currency storage, provided they are offered by developers enrolled as an organization. Wallet apps published from an Individual Apple Developer account are rejected.",
                   "common_violations": [
                     "Publishing a crypto wallet from an Individual developer account instead of an Organization account"
                   ]
                 },
                 {
-                  "section": "3.1.5(b)(ii)",
+                  "section": "3.1.5(b) Mining",
                   "title": "Cryptocurrency Mining",
-                  "content": "Apps may not mine for cryptocurrencies unless the processing is performed off device (e.g. cloud-based mining)."
+                  "content": "Apple's wording: apps may not mine for cryptocurrencies unless the processing is performed off device (e.g. cloud-based mining)."
                 },
                 {
-                  "section": "3.1.5(b)(iii)",
+                  "section": "3.1.5(b) Exchanges",
                   "title": "Cryptocurrency Exchanges",
-                  "content": "Apps may facilitate transactions or transmissions of cryptocurrency on an approved exchange, provided they are offered by the exchange itself, or an approved organization in compliance with all applicable law, in the regions or countries where the app is available. This covers custody, fiat on-ramp and off-ramp, and peer-to-peer trading. App Review commonly requests money-transmission/VASP licensing evidence or a legal opinion, geo-restricted availability, and a working demo account before approving these apps.",
+                  "content": "Apple's wording: apps may facilitate transactions or transmissions of cryptocurrency on an approved exchange, provided they are offered by the exchange itself. Practical guidance (not guideline text): for exchange, fiat on/off-ramp, or transmission apps, App Review's crypto team commonly requests via the Resolution Center — proof the operating entity is licensed (or a legal opinion that licensing is not required in the shipped regions), availability restricted to authorized regions, and a working demo account. Custody, peer-to-peer trading, and fiat on/off-ramp fall in scope.",
                   "common_violations": [
                     "Facilitating a crypto exchange or fiat on/off-ramp without licensing evidence or a legal opinion for the territories where the app ships",
                     "Offering the app in regions where the operator is not licensed to provide the service",
                     "Submitting without a working demo account for the reviewer to exercise the exchange flow"
                   ]
+                },
+                {
+                  "section": "3.1.5(b) ICOs and crypto-securities",
+                  "title": "Initial Coin Offerings and Crypto-Securities",
+                  "content": "Apple's wording: apps facilitating Initial Coin Offerings (ICOs), cryptocurrency futures trading, and other crypto-securities or quasi-securities trading must come from established banks, securities firms, futures commission merchants (FCMs), or other approved financial institutions and must comply with all applicable law."
                 }
               ]
             }
