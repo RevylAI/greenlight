@@ -18,8 +18,10 @@ import "regexp"
 //     non-crypto app can't trip CI.
 //   - crypto-wallet-org-account and crypto-exchange-signals are WARN — weaker
 //     wallet-SDK and copy/phrase heuristics that inform without gating.
+//   - crypto-exchange-brand is WARN — a reference to a known exchange/wallet
+//     brand (by domain or SDK), which may only mean the app links out.
 //
-// All three are firstMatchOnly (a crypto app is a project-level fact) and carry
+// All four are firstMatchOnly (a crypto app is a project-level fact) and carry
 // no antiPatterns, since the obligation can't be discharged in source. Silence a
 // finding on a code line with `// greenlight:ignore <rule-id>`, or — because the
 // SDK rules fire on package.json, where a comment can't live — disable/downgrade
@@ -95,6 +97,30 @@ func cryptoComplianceRules() []Rule {
 				// exchange", "does not buy crypto") so a denial doesn't read as a
 				// claim. Whole-line skip; a real crypto app trips other lines.
 				regexp.MustCompile(`(?i)\b(not|never|no|without|isn['’]?t|aren['’]?t|does[n']?['’]?t|do[n']?['’]?t|won['’]?t|can[n']?o?['’]?t)\b.{0,30}?(crypto|exchange|on[_-]?ramp|off[_-]?ramp|bitcoin)`),
+			},
+			firstMatchOnly: true,
+		},
+		// WARN — a reference to a known cryptocurrency exchange / wallet brand.
+		// Matched only as a domain (deep-link / API host) or an SDK package, never
+		// a bare word, so "kraken"/"gemini"/"gate" in unrelated code don't fire.
+		// WARN because a reference can mean the app merely links out — but for the
+		// app's own exchange brand it's a strong "this is a crypto exchange" tell.
+		&PatternRule{
+			id:        "crypto-exchange-brand",
+			title:     "Reference to a crypto exchange / wallet brand",
+			guideline: "3.1.5",
+			severity:  SeverityWarn,
+			detail:    "A known cryptocurrency exchange/wallet brand is referenced (by domain or SDK) — e.g. Coinbase, Binance, Kraken, Bybit, OKX, KuCoin, Crypto.com, Unigox. If the app itself facilitates trading, exchange, transmission, or fiat on/off-ramp — rather than only linking out to the exchange's website — Guideline 3.1.5(b) applies (offered by the exchange itself), and App Review commonly asks for licensing evidence or a legal opinion, region-restricted availability, and a demo account.",
+			fix:       "Confirm whether the app performs, versus merely links to, the exchange's services. If it performs them, prepare the 3.1.5(b) materials before submitting. Silence with `// greenlight:ignore crypto-exchange-brand`, or in .greenlight.yml (`rules: { crypto-exchange-brand: { enabled: false } }`).",
+			languages: []string{"json", "typescript", "javascript", "swift", "objc"},
+			patterns: []*regexp.Regexp{
+				// Exchange/wallet brand as a domain (deep-link, API host, associated
+				// domain). The .tld anchor keeps "kraken"/"gemini"/"gate" from
+				// matching the mythical creature / Google Gemini / "stargate".
+				regexp.MustCompile(`(?i)\b(unigox|coinbase|binance|kraken|bybit|okx|kucoin|bitfinex|bitstamp|bitget|mexc|huobi|gate|gemini|crypto|bitpay)\.(com|io|us|exchange)\b`),
+				// ...or as an exchange SDK / API client package (scoped brand or a
+				// distinctive library like ccxt, the multi-exchange trading lib).
+				regexp.MustCompile(`(?i)['"](ccxt|@unigox/[\w.-]+|@binance/[\w.-]+|binance-connector|node-binance-api|@okx/[\w.-]+|coinbase-pro|@coinbase-samples/[\w.-]+|@kucoin/[\w.-]+|@bybit/[\w.-]+)['"]`),
 			},
 			firstMatchOnly: true,
 		},

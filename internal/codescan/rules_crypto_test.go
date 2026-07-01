@@ -145,10 +145,49 @@ func TestCryptoExchangeSignals(t *testing.T) {
 	}
 }
 
-// All three crypto advisories are project-level facts: firstMatchOnly, no
+// A known exchange/wallet brand as a domain or SDK package fires the WARN brand
+// rule; the same brand words in unrelated code (Google Gemini, "stargate.io",
+// the mythical kraken, a bare "coinbase" string) do not.
+func TestCryptoExchangeBrand(t *testing.T) {
+	r := ruleByID(t, "crypto-exchange-brand")
+	if r.severity != SeverityWarn {
+		t.Fatalf("crypto-exchange-brand should be WARN, got %s", r.severity)
+	}
+
+	fire := []FileContext{
+		tsCtx(`const APPLINK = "applinks:unigox.com";`),   // the app's own brand
+		jsonCtx(`    "@unigox/web-app-shared": "1.0.0",`), // scoped brand package
+		tsCtx(`const api = "https://api.coinbase.com/v2/prices";`),
+		tsCtx(`const url = "https://www.binance.com/en";`),
+		tsCtx(`const ex = "https://crypto.com/exchange";`),
+		jsonCtx(`    "ccxt": "4.4.0",`), // multi-exchange trading lib
+		jsonCtx(`    "@kucoin/api": "1.0.0",`),
+	}
+	for i, ctx := range fire {
+		if got := r.Check(ctx); len(got) == 0 {
+			t.Errorf("fire case %d: expected a finding for %q", i, ctx.Lines[0])
+		}
+	}
+
+	noFire := []FileContext{
+		tsCtx(`const ai = "https://gemini.google.com/app";`), // Google Gemini, not the exchange
+		tsCtx(`const repo = "https://stargate.io/docs";`),    // \bgate anchored, "stargate" excluded
+		tsCtx(`const h = crypto.createHash("sha256");`),      // node crypto module, no .com
+		tsCtx(`const brand = "coinbase";`),                   // bare word, no domain/SDK anchor
+		swiftCtx(`let monster = Kraken(tentacles: 8)`),       // mythical creature identifier
+		jsonCtx(`    "gatekeeper": "1.0.0",`),
+	}
+	for i, ctx := range noFire {
+		if got := r.Check(ctx); len(got) != 0 {
+			t.Errorf("no-fire case %d: expected no finding for %q, got %+v", i, ctx.Lines[0], got)
+		}
+	}
+}
+
+// All crypto advisories are project-level facts: firstMatchOnly, no
 // antiPatterns.
 func TestCryptoRulesShape(t *testing.T) {
-	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-sdk", "crypto-exchange-signals"} {
+	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-sdk", "crypto-exchange-signals", "crypto-exchange-brand"} {
 		r := ruleByID(t, id)
 		if !r.firstMatchOnly {
 			t.Errorf("%s should be firstMatchOnly so it reports once per project", id)
@@ -168,7 +207,7 @@ func TestCryptoRulesShape(t *testing.T) {
 // fire on package.json, the .greenlight.yml suppression path — never the
 // bracketed form the scanner does not honor.
 func TestCryptoFixTextSuppressionSyntax(t *testing.T) {
-	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-sdk", "crypto-exchange-signals"} {
+	for _, id := range []string{"crypto-wallet-org-account", "crypto-exchange-sdk", "crypto-exchange-signals", "crypto-exchange-brand"} {
 		fix := ruleByID(t, id).fix
 		if strings.Contains(fix, "greenlight:ignore["+id+"]") {
 			t.Errorf("%s fix uses the bracketed directive form, which the scanner does not honor", id)
