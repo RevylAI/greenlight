@@ -23,15 +23,17 @@ var dim = color.New(color.Faint)
 
 var rootCmd = &cobra.Command{
 	Use:   "greenlight",
-	Short: "Pre-submission compliance scanner for the Apple App Store",
+	Short: "Pre-submission compliance scanner for the App Store and Google Play",
 	Long: fmt.Sprintf(`%s
 
-Greenlight scans your app against Apple's App Store Review Guidelines
-before you submit, catching rejection risks so you ship with confidence.
+Greenlight scans your app against Apple's App Store Review Guidelines and
+Google Play's Developer Program Policies before you submit, catching
+rejection risks so you ship with confidence.
 
 Get started:
   greenlight preflight .          Run ALL checks — one command, zero uploads
   greenlight preflight . --ipa X  Include IPA binary analysis
+  greenlight playscan .           Google Play policies + target API deadline
   greenlight scan --app-id ID     Check App Store Connect metadata (needs API key)
   greenlight guidelines search    Browse Apple's review guidelines`,
 		purple.Sprint("greenlight — know before you submit.")),
