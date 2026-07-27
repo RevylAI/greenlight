@@ -382,6 +382,7 @@ func TestForegroundServiceMultipleTypes(t *testing.T) {
 	root := writeProject(t, map[string]string{
 		"app/build.gradle": "android { defaultConfig { targetSdk = 36 } }",
 		"app/src/main/AndroidManifest.xml": manifestHeader + `
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <application>
         <service android:name=".Svc" android:foregroundServiceType="location|camera" />
@@ -392,9 +393,114 @@ func TestForegroundServiceMultipleTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	f := findByPolicy(res.Findings, "Foreground services")
-	if f == nil || !strings.Contains(f.Detail, "FOREGROUND_SERVICE_CAMERA") {
-		t.Fatalf("the camera half of location|camera was not checked, got %+v", f)
+	var sawCamera bool
+	for _, f := range res.Findings {
+		if f.Policy == "Foreground services" && strings.Contains(f.Detail, "FOREGROUND_SERVICE_CAMERA") {
+			sawCamera = true
+		}
+	}
+	if !sawCamera {
+		t.Fatalf("the camera half of location|camera was not checked: %+v", res.Findings)
+	}
+	// location's permission is declared, so only camera should be reported.
+	for _, f := range res.Findings {
+		if f.Policy == "Foreground services" && strings.Contains(f.Detail, "FOREGROUND_SERVICE_LOCATION") {
+			t.Errorf("location permission is declared but was still reported: %s", f.Detail)
+		}
+	}
+}
+
+// Every foreground service needs the base FOREGROUND_SERVICE permission, not
+// just the type-specific one. Checking only the type-specific permissions
+// missed this case entirely.
+func TestForegroundServiceBasePermissionRequired(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"app/build.gradle": "android { defaultConfig { targetSdk = 36 } }",
+		"app/src/main/AndroidManifest.xml": manifestHeader + `
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <application>
+        <service android:name=".Svc" android:foregroundServiceType="location" />
+    </application>
+</manifest>`,
+	})
+	res, err := Scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	var sawBase bool
+	for _, f := range res.Findings {
+		if f.Policy == "Foreground services" && strings.Contains(f.Title, "without the FOREGROUND_SERVICE permission") {
+			sawBase = true
+			if f.Severity != sevCritical {
+				t.Errorf("severity = %s, want CRITICAL", f.Severity)
+			}
+		}
+	}
+	if !sawBase {
+		t.Error("missing base FOREGROUND_SERVICE permission was not reported")
+	}
+}
+
+// BIND_* permissions are never requested via <uses-permission>; the framework
+// requires them as the component's android:permission. Checking only the
+// uses-permission list meant these rules could never fire.
+func TestComponentBoundPermissionsDetected(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"app/build.gradle": "android { defaultConfig { targetSdk = 36 } }",
+		"app/src/main/AndroidManifest.xml": manifestHeader + `
+    <application>
+        <service android:name=".A11yService"
+                 android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE" />
+        <service android:name=".Vpn"
+                 android:permission="android.permission.BIND_VPN_SERVICE" />
+        <receiver android:name=".Admin"
+                  android:permission="android.permission.BIND_DEVICE_ADMIN" />
+    </application>
+</manifest>`,
+	})
+	res, err := Scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	for _, policy := range []string{"Accessibility API", "VPN Service", "Device admin"} {
+		if findByPolicy(res.Findings, policy) == nil {
+			t.Errorf("component-declared permission for %q was not detected", policy)
+		}
+	}
+}
+
+// The app module is frequently not named "app", so Gradle files must be ranked
+// against the module the selected manifest belongs to. Otherwise a library
+// module's targetSdk can be reported as the app's.
+func TestGradleSelectionFollowsAppModule(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		// A library module that would otherwise win on path score.
+		"app/build.gradle": "android { defaultConfig { targetSdk = 30 } }",
+		"app/src/main/AndroidManifest.xml": manifestHeader + `
+    <application />
+</manifest>`,
+		// The real application module, named after the product.
+		"MyProduct/build.gradle": "android { defaultConfig { targetSdk = 36 } }",
+		"MyProduct/src/main/AndroidManifest.xml": manifestHeader + `
+    <application>
+        <activity android:name=".Main" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>`,
+	})
+	res, err := Scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if res.TargetSDK != 36 {
+		t.Errorf("TargetSDK = %d, want 36 from the app module's own build.gradle", res.TargetSDK)
+	}
+	if f := findByPolicy(res.Findings, "Target API level"); f != nil {
+		t.Errorf("app module targets 36 and is compliant, got %q", f.Title)
 	}
 }
 
@@ -912,5 +1018,72 @@ func TestTargetSDKResolvedThroughReferences(t *testing.T) {
 				t.Errorf("TargetSDK = %d, want %d", res.TargetSDK, tc.want)
 			}
 		})
+	}
+}
+
+// Most real builds reach the Billing Library version through a variable or a
+// version catalog. Requiring a literal meant the support-window check silently
+// never fired on them.
+func TestBillingVersionResolvedThroughReferences(t *testing.T) {
+	freezeClock(t, time.Date(2026, time.July, 27, 0, 0, 0, 0, time.UTC))
+	cases := []struct {
+		name  string
+		files map[string]string
+		want  string
+	}{
+		{
+			name: "groovy string interpolation",
+			files: map[string]string{
+				"app/build.gradle": `ext { billingVersion = "7.1.1" }
+android { defaultConfig { targetSdk = 36 } }
+dependencies { implementation "com.android.billingclient:billing:$billingVersion" }`,
+			},
+			want: "7.1",
+		},
+		{
+			name: "version catalog version.ref",
+			files: map[string]string{
+				"app/build.gradle": `android { defaultConfig { targetSdk = 36 } }
+dependencies { implementation libs.billing }`,
+				"gradle/libs.versions.toml": `[versions]
+billing = "6.2.0"
+
+[libraries]
+billing = { module = "com.android.billingclient:billing", version.ref = "billing" }`,
+			},
+			want: "6.2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := writeProject(t, tc.files)
+			res, err := Scan(root)
+			if err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			f := findByPolicy(res.Findings, "Play Billing Library")
+			if f == nil {
+				t.Fatalf("an out-of-support billing version reached by reference was not detected")
+			}
+			if !strings.Contains(f.Title, tc.want) {
+				t.Errorf("title = %q, want it to carry version %s", f.Title, tc.want)
+			}
+		})
+	}
+}
+
+// A supported version reached by reference must stay clean.
+func TestBillingVersionByReferenceSupportedIsClean(t *testing.T) {
+	root := writeProject(t, map[string]string{
+		"app/build.gradle": `ext { billingVersion = "8.0.0" }
+android { defaultConfig { targetSdk = 36 } }
+dependencies { implementation "com.android.billingclient:billing:$billingVersion" }`,
+	})
+	res, err := Scan(root)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if f := findByPolicy(res.Findings, "Play Billing Library"); f != nil {
+		t.Errorf("Billing 8 is supported, got %q", f.Title)
 	}
 }

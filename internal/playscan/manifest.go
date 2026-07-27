@@ -177,3 +177,22 @@ func parseSDKInt(v string) int {
 	}
 	return n
 }
+
+// HasComponentPermission reports whether any component is guarded by the given
+// android:permission.
+//
+// The BIND_* permissions are declared this way rather than through
+// <uses-permission>: the framework requires the bound service or receiver to
+// name the permission the system holds. Checking only the uses-permission list
+// would miss every accessibility service, device admin, and VPN service.
+func (m *Manifest) HasComponentPermission(name string) bool {
+	if m.Application == nil {
+		return false
+	}
+	for _, comp := range m.Application.Components() {
+		if strings.TrimSpace(comp.Permission) == name {
+			return true
+		}
+	}
+	return false
+}

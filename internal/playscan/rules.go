@@ -186,6 +186,11 @@ type restrictedPermission struct {
 	// minTargetSDK gates policies that only bind above a target level; 0 means
 	// the policy applies regardless.
 	minTargetSDK int
+	// componentBound marks a BIND_* permission that is never requested via
+	// <uses-permission>. The framework requires it as the android:permission
+	// attribute of the <service> or <receiver> being bound, so checking only
+	// the uses-permission list would never fire.
+	componentBound bool
 }
 
 var restrictedPermissions = []restrictedPermission{
@@ -270,8 +275,9 @@ var restrictedPermissions = []restrictedPermission{
 		title:    "Accessibility Service use is tightly restricted",
 		detail: "The Accessibility APIs may only be used to help users with disabilities, and the app must disclose the use in the store listing and in-app. " +
 			"Using accessibility for automation, overlays, or ad interaction is one of the most common causes of app suspension rather than simple rejection.",
-		fix: "Confirm the service exists to support users with disabilities and disclose it prominently. Otherwise use a purpose-built API.",
-		doc: docProgramPolicy,
+		fix:            "Confirm the service exists to support users with disabilities and disclose it prominently. Otherwise use a purpose-built API.",
+		doc:            docProgramPolicy,
+		componentBound: true,
 	},
 	{
 		names:    []string{"android.permission.SYSTEM_ALERT_WINDOW"},
@@ -283,13 +289,24 @@ var restrictedPermissions = []restrictedPermission{
 		doc:      docProgramPolicy,
 	},
 	{
-		names:    []string{"android.permission.BIND_DEVICE_ADMIN"},
-		severity: sevWarn,
-		policy:   "Device admin",
-		title:    "Device administrator API requires a permitted use case",
-		detail:   "Device admin is limited to genuine device management use cases. Using it to make the app hard to uninstall is an abuse signal.",
-		fix:      "Confirm the app is an enterprise or family management tool, and that admin rights can be revoked normally.",
-		doc:      docProgramPolicy,
+		names:          []string{"android.permission.BIND_DEVICE_ADMIN"},
+		severity:       sevWarn,
+		policy:         "Device admin",
+		title:          "Device administrator API requires a permitted use case",
+		detail:         "Device admin is limited to genuine device management use cases. Using it to make the app hard to uninstall is an abuse signal.",
+		fix:            "Confirm the app is an enterprise or family management tool, and that admin rights can be revoked normally.",
+		doc:            docProgramPolicy,
+		componentBound: true,
+	},
+	{
+		names:          []string{"android.permission.BIND_VPN_SERVICE"},
+		severity:       sevWarn,
+		policy:         "VPN Service",
+		title:          "VPN service requires the VpnService declaration",
+		detail:         "Only apps whose core functionality is a VPN may use VpnService, and the use must be declared in Play Console. Using it to monitor or redirect other apps' traffic for analytics or ad injection violates policy.",
+		fix:            "Confirm a VPN is the app's core purpose and complete the VPN declaration in Play Console.",
+		doc:            docProgramPolicy,
+		componentBound: true,
 	},
 	{
 		names:    []string{"android.permission.PACKAGE_USAGE_STATS"},
@@ -323,6 +340,12 @@ func ruleRestrictedPermissions(c *ruleContext) []Finding {
 		var hit []string
 		for _, name := range rp.names {
 			if c.manifest.HasPermission(name) {
+				hit = append(hit, shortPermission(name))
+				continue
+			}
+			// BIND_* permissions are enforced on the component, not requested
+			// by the app, so they appear as a component's android:permission.
+			if rp.componentBound && c.manifest.HasComponentPermission(name) {
 				hit = append(hit, shortPermission(name))
 			}
 		}
@@ -372,6 +395,30 @@ func ruleForegroundServiceTypes(c *ruleContext) []Finding {
 	}
 	var findings []Finding
 	reported := make(map[string]bool)
+
+	// Every foreground service needs the base FOREGROUND_SERVICE permission
+	// from API 28, independent of its type. Without it startForeground()
+	// throws just as surely as a missing type-specific permission, so checking
+	// only the type-specific ones misses the case entirely.
+	declaresForegroundService := false
+	for _, svc := range c.manifest.Application.Services {
+		if svc.ForegroundSvcType != "" {
+			declaresForegroundService = true
+			break
+		}
+	}
+	if declaresForegroundService && !c.manifest.HasPermission("android.permission.FOREGROUND_SERVICE") {
+		findings = append(findings, Finding{
+			Severity: sevCritical,
+			Policy:   "Foreground services",
+			Title:    "Foreground service declared without the FOREGROUND_SERVICE permission",
+			Detail: "The manifest declares a foreground service but does not request android.permission.FOREGROUND_SERVICE, which every foreground service has required since API 28. " +
+				"startForeground() throws SecurityException, so the feature fails on every supported device.",
+			Fix:  "Add <uses-permission android:name=\"android.permission.FOREGROUND_SERVICE\" /> to the manifest.",
+			Doc:  docForegroundSvc,
+			File: c.manifestFile,
+		})
+	}
 
 	for _, svc := range c.manifest.Application.Services {
 		if svc.ForegroundSvcType == "" {

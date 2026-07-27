@@ -58,6 +58,7 @@ func ScanArchive(archivePath string) (*ScanResult, error) {
 		ArchiveKind:  string(kind),
 		ManifestPath: manifestEntry,
 		IsArchive:    true,
+		Findings:     []Finding{},
 	}
 
 	var manifest *Manifest

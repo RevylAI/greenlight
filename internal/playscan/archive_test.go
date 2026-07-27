@@ -598,3 +598,124 @@ func TestScanArchiveAABEndToEnd(t *testing.T) {
 		t.Errorf("aligned bundle library reported: %s", f.Title)
 	}
 }
+
+// --- review regressions ------------------------------------------------
+
+// Primitive's oneof field numbers are non-contiguous in Resources.proto
+// (float=3, int_decimal=6, int_hex=7, boolean=8). Treating an early number as
+// the boolean silently misread every compiled boolean in a bundle, so
+// android:debuggable="true" decoded as neither true nor false.
+func TestDecodeCompiledPrimitiveUsesRealSchema(t *testing.T) {
+	// Item { Primitive prim = 7 { bool boolean_value = 8 } }
+	varint := func(num int, v uint64) []byte {
+		out := binary.AppendUvarint(nil, uint64(num)<<3|0)
+		return binary.AppendUvarint(out, v)
+	}
+	boolItem := pbField(7, varint(8, 1))
+	if got := decodeCompiledItem(boolItem); got != "true" {
+		t.Errorf("boolean_value(field 8)=1 decoded as %q, want \"true\"", got)
+	}
+	falseItem := pbField(7, varint(8, 0))
+	if got := decodeCompiledItem(falseItem); got != "false" {
+		t.Errorf("boolean_value(field 8)=0 decoded as %q, want \"false\"", got)
+	}
+
+	// int_decimal_value = 6 uses zigzag (int32).
+	zig := func(num int, v int64) []byte {
+		out := binary.AppendUvarint(nil, uint64(num)<<3|0)
+		return binary.AppendVarint(out, v)
+	}
+	intItem := pbField(7, zig(6, 34))
+	if got := decodeCompiledItem(intItem); got != "34" {
+		t.Errorf("int_decimal_value=34 decoded as %q", got)
+	}
+
+	// int_hexadecimal_value = 7 carries the foregroundServiceType bitmask.
+	hexItem := pbField(7, varint(7, 1<<3))
+	if got := decodeCompiledItem(hexItem); got != "location" {
+		t.Errorf("int_hex bitmask decoded as %q, want \"location\"", got)
+	}
+
+	// Item { String str = 2 { string value = 1 } }
+	strItem := pbField(2, pbString(1, "com.example.Thing"))
+	if got := decodeCompiledItem(strItem); got != "com.example.Thing" {
+		t.Errorf("String item decoded as %q", got)
+	}
+}
+
+// A compiled boolean must reach the policy rules, so an AAB with
+// debuggable stored as a Primitive is still caught.
+func TestAABCompiledBooleanReachesRules(t *testing.T) {
+	varint := func(num int, v uint64) []byte {
+		out := binary.AppendUvarint(nil, uint64(num)<<3|0)
+		return binary.AppendUvarint(out, v)
+	}
+	// XmlAttribute { name = 2, compiled_item = 6 } with no source text.
+	debuggableAttr := append(pbString(2, "debuggable"), pbField(6, pbField(7, varint(8, 1)))...)
+
+	manifest := pbElement("manifest",
+		[][]byte{pbAttr("package", "com.example.bundle")},
+		[][]byte{
+			pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", "36")}, nil),
+			pbElement("application", [][]byte{debuggableAttr}, nil),
+		})
+
+	m, err := DecodeProtoXML(manifest)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if m.Application == nil || !attrIsTrue(m.Application.Debuggable) {
+		t.Fatalf("compiled debuggable boolean not decoded: %+v", m.Application)
+	}
+}
+
+// The protobuf decoder recurses per nesting level, and a Go stack overflow is
+// an unrecoverable process abort. A deeply nested bundle must be rejected, not
+// crash the tool.
+func TestDecodeProtoXMLRejectsDeepNesting(t *testing.T) {
+	// Each level is XmlElement{ name, child = XmlNode{ element = <next> } }.
+	// The whole thing is wrapped in one XmlNode at the end, matching what
+	// DecodeProtoXML expects at the root.
+	elem := pbString(3, "manifest")
+	for i := 0; i < maxXMLDepth+50; i++ {
+		elem = append(pbString(3, "m"), pbField(5, pbField(1, elem))...)
+	}
+	_, err := DecodeProtoXML(pbField(1, elem))
+	if err == nil {
+		t.Fatal("deeply nested manifest should be rejected")
+	}
+	if !strings.Contains(err.Error(), "nesting") {
+		t.Errorf("error should name the nesting limit, got %v", err)
+	}
+}
+
+// attrCount is a uint16 read straight from the file and need not match the
+// bytes present. Uncapped, a 36-byte chunk claiming 65535 attributes forced a
+// 2 MB allocation, and a file packed with them burned gigabytes.
+func TestDecodeStartTagCapsAttrCountToChunkSize(t *testing.T) {
+	var chunk bytes.Buffer
+	binary.Write(&chunk, binary.LittleEndian, uint16(chunkXMLStartTag))
+	binary.Write(&chunk, binary.LittleEndian, uint16(8))
+	binary.Write(&chunk, binary.LittleEndian, uint32(36))
+	binary.Write(&chunk, binary.LittleEndian, uint32(1))          // lineNumber
+	binary.Write(&chunk, binary.LittleEndian, uint32(0xFFFFFFFF)) // comment
+	binary.Write(&chunk, binary.LittleEndian, uint32(0xFFFFFFFF)) // ns
+	binary.Write(&chunk, binary.LittleEndian, uint32(0))          // name
+	binary.Write(&chunk, binary.LittleEndian, uint16(20))         // attributeStart
+	binary.Write(&chunk, binary.LittleEndian, uint16(20))         // attributeSize
+	binary.Write(&chunk, binary.LittleEndian, uint16(65535))      // attributeCount, a lie
+	binary.Write(&chunk, binary.LittleEndian, uint16(0))
+	binary.Write(&chunk, binary.LittleEndian, uint16(0))
+	binary.Write(&chunk, binary.LittleEndian, uint16(0))
+
+	_, attrs, err := decodeStartTag(chunk.Bytes(), []string{"tag"}, nil)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(attrs) != 0 {
+		t.Errorf("got %d attributes from a chunk with room for none", len(attrs))
+	}
+	if c := cap(attrs); c > 8 {
+		t.Errorf("allocated capacity %d for a chunk with room for 0 attributes", c)
+	}
+}

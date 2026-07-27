@@ -215,6 +215,18 @@ func decodeStartTag(chunk []byte, pool []string, resMap []uint32) (string, []axm
 
 	name := poolAt(pool, nameIdx)
 
+	// attrCount is attacker-controlled (a uint16 read straight from the file)
+	// and need not match the bytes actually present. Cap it by what the chunk
+	// can physically hold before allocating, otherwise a 36-byte chunk claiming
+	// 65535 attributes costs a 2 MB allocation, and a file packed with such
+	// chunks turns a tiny APK into gigabytes of allocation churn.
+	if room := (len(chunk) - attrExtOffset - attrStart) / attrSize; attrCount > room {
+		if room < 0 {
+			room = 0
+		}
+		attrCount = room
+	}
+
 	attrs := make([]axmlAttr, 0, attrCount)
 	for i := 0; i < attrCount; i++ {
 		off := attrExtOffset + attrStart + i*attrSize

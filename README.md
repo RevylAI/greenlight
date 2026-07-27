@@ -102,7 +102,8 @@ stores in one pass.
   August 31, 2026; apps below API 35 already lose distribution to new users on
   newer devices — **CRITICAL / HIGH**
 - **Play Billing Library** — v7 and below lose support August 31, 2026, and
-  there is no direct v7 → v9 upgrade path — **HIGH**
+  there is no direct v7 → v9 upgrade path. Versions reached through a variable
+  or a version catalog `version.ref` are resolved — **HIGH**
 
 **Restricted permissions** (each needs an approved use case or declaration form)
 - SMS and Call Log — including the July 2026 change that drops phone-call
@@ -111,12 +112,15 @@ stores in one pass.
 - `QUERY_ALL_PACKAGES`, `REQUEST_INSTALL_PACKAGES`
 - `ACCESS_BACKGROUND_LOCATION` (declaration + demo video)
 - Broad photo/video access over the system Photo Picker (API 33+)
-- Accessibility Service, overlays, device admin, usage stats
+- Accessibility Service, VPN service, device admin — declared as a component's
+  `android:permission` rather than `<uses-permission>`
+- Overlays, usage stats
 - Contacts, ahead of the 2026 Contact Permissions policy
 
 **Manifest and build**
-- Foreground service types missing their required `FOREGROUND_SERVICE_*`
-  permission — crashes at `startForeground()` on Android 14+ — **CRITICAL**
+- Foreground services missing the base `FOREGROUND_SERVICE` permission, or a
+  declared type missing its `FOREGROUND_SERVICE_*` permission — both throw at
+  `startForeground()` — **CRITICAL**
 - `specialUse` foreground services needing a Console justification
 - `android:exported` missing on components with an intent filter (API 31+) —
   the package fails to install — **CRITICAL**

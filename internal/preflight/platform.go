@@ -48,21 +48,29 @@ func detectIOS(root string) bool {
 			return nil
 		}
 
+		lower := strings.ToLower(name)
 		switch {
 		case strings.EqualFold(name, "Info.plist"),
 			strings.EqualFold(name, "Podfile"),
 			strings.EqualFold(name, "Package.swift"),
 			strings.EqualFold(name, "project.pbxproj"),
 			strings.HasSuffix(name, ".xcprivacy"),
-			strings.HasSuffix(strings.ToLower(name), ".swift"),
-			strings.HasSuffix(strings.ToLower(name), ".xcodeproj"):
+			strings.HasSuffix(lower, ".swift"),
+			// Objective-C sources: codescan reads these for private-API use, so
+			// missing them would silently drop real Apple findings.
+			strings.HasSuffix(lower, ".m"),
+			strings.HasSuffix(lower, ".mm"),
+			strings.HasSuffix(lower, ".h"),
+			strings.HasSuffix(lower, ".xcodeproj"):
 			found = true
 			return filepath.SkipAll
 		}
 
-		// An Expo / React Native config with an ios section ships to the App
-		// Store even when the repo holds no native iOS sources.
-		if strings.EqualFold(name, "app.json") || strings.EqualFold(name, "app.config.js") || strings.EqualFold(name, "app.config.ts") {
+		// An Expo / React Native config ships to the App Store even when the
+		// repo holds no native iOS sources. All four spellings count; missing
+		// one classifies a cross-platform app as Android-only.
+		switch lower {
+		case "app.json", "app.config.js", "app.config.ts", "app.config.json":
 			found = true
 			return filepath.SkipAll
 		}

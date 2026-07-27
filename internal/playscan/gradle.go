@@ -10,9 +10,8 @@ import (
 
 // GradleInfo is what the policy rules need out of the Gradle build files.
 type GradleInfo struct {
-	TargetSDK  int
-	CompileSDK int
-	MinSDK     int
+	TargetSDK int
+	MinSDK    int
 	// TargetSDKFile / TargetSDKLine locate the declaration so the report can
 	// point at the line to edit.
 	TargetSDKFile string
@@ -23,7 +22,6 @@ type GradleInfo struct {
 	BillingVersionRaw string
 	BillingFile       string
 	BillingLine       int
-	Dependencies      []string
 	HasAdsSDK         bool
 	HasAuthSDK        bool
 	AdsSDKFile        string
@@ -51,13 +49,25 @@ type GradleInfo struct {
 // rootProject.ext.targetSdkVersion`) is skipped here and picked up from
 // whichever file defines the literal, since ext blocks are scanned too.
 var (
-	reTargetSDK  = regexp.MustCompile(`\btargetSdk(?:Version)?\b\s*(?:=|\.set\(|\()?\s*["']?(\d{1,2})["']?`)
-	reCompileSDK = regexp.MustCompile(`\bcompileSdk(?:Version)?\b\s*(?:=|\.set\(|\()?\s*["']?(\d{1,2})["']?`)
-	reMinSDK     = regexp.MustCompile(`\bminSdk(?:Version)?\b\s*(?:=|\.set\(|\()?\s*["']?(\d{1,2})["']?`)
+	reTargetSDK = regexp.MustCompile(`\btargetSdk(?:Version)?\b\s*(?:=|\.set\(|\()?\s*["']?(\d{1,2})["']?`)
+	reMinSDK    = regexp.MustCompile(`\bminSdk(?:Version)?\b\s*(?:=|\.set\(|\()?\s*["']?(\d{1,2})["']?`)
 
 	// Matches com.android.billingclient:billing:8.0.0 and the -ktx artifact,
 	// including version catalog style quoting.
 	reBilling = regexp.MustCompile(`com\.android\.billingclient:billing(?:-ktx)?:["']?v?(\d+)(?:\.(\d+))?`)
+
+	// The billing artifact with its version supplied indirectly, which is how
+	// most real builds declare it. Without these the version is unreadable and
+	// the support-window check silently never fires:
+	//
+	//	implementation "com.android.billingclient:billing:$billingVersion"
+	//	billing = { module = "com.android.billingclient:billing", version.ref = "billing" }
+	reBillingInterp = regexp.MustCompile(`com\.android\.billingclient:billing(?:-ktx)?:\$\{?([A-Za-z_][A-Za-z0-9_.]*)\}?`)
+	reBillingRef    = regexp.MustCompile(`com\.android\.billingclient:billing(?:-ktx)?["'].*version\.ref\s*=\s*["']([A-Za-z_][A-Za-z0-9_-]*)["']`)
+
+	// A version string constant, e.g. billingVersion = "7.1.1" or a
+	// [versions] entry in a catalog.
+	reVersionString = regexp.MustCompile(`(?:^|\s)(?:const\s+)?(?:val|var|ext\.)?\s*([A-Za-z_][A-Za-z0-9_-]*)\s*=\s*["']v?(\d+)(?:\.(\d+))?[^"']*["']`)
 
 	reAdsSDK = regexp.MustCompile(`(?i)(com\.google\.android\.gms:play-services-ads|com\.google\.android\.ads|applovin|com\.facebook\.android:audience-network|com\.unity3d\.ads|ironsource|com\.mbridge|com\.vungle|adcolony|com\.chartboost)`)
 
@@ -175,6 +185,11 @@ func parseGradleFiles(paths []string, relTo func(string) string) *GradleInfo {
 	var refExpr, refFile string
 	var refLine int
 
+	// Version strings, and the first unresolved billing version reference.
+	versionStrings := map[string]string{}
+	var billingRef, billingRefFile string
+	var billingRefLine int
+
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err != nil {
@@ -186,6 +201,16 @@ func parseGradleFiles(paths []string, relTo func(string) string) *GradleInfo {
 			code := stripGradleComment(line)
 			if code == "" {
 				continue
+			}
+
+			if m := reVersionString.FindStringSubmatch(code); m != nil {
+				if _, seen := versionStrings[m[1]]; !seen {
+					v := m[2]
+					if m[3] != "" {
+						v = m[2] + "." + m[3]
+					}
+					versionStrings[m[1]] = v
+				}
 			}
 
 			for _, re := range []*regexp.Regexp{reSymbolAssign, reSymbolSet, reSymbolTo} {
@@ -209,13 +234,6 @@ func parseGradleFiles(paths []string, relTo func(string) string) *GradleInfo {
 					}
 				}
 			}
-			if g.CompileSDK == 0 {
-				if m := reCompileSDK.FindStringSubmatch(code); m != nil {
-					if v, err := strconv.Atoi(m[1]); err == nil {
-						g.CompileSDK = v
-					}
-				}
-			}
 			if g.MinSDK == 0 {
 				if m := reMinSDK.FindStringSubmatch(code); m != nil {
 					if v, err := strconv.Atoi(m[1]); err == nil {
@@ -232,6 +250,12 @@ func parseGradleFiles(paths []string, relTo func(string) string) *GradleInfo {
 							g.BillingVersionRaw = m[1] + "." + m[2]
 						}
 						g.BillingFile, g.BillingLine = rel, lineNo
+					}
+				} else if billingRef == "" {
+					if mm := reBillingInterp.FindStringSubmatch(code); mm != nil {
+						billingRef, billingRefFile, billingRefLine = lastIdentSegment(mm[1]), rel, lineNo
+					} else if mm := reBillingRef.FindStringSubmatch(code); mm != nil {
+						billingRef, billingRefFile, billingRefLine = mm[1], rel, lineNo
 					}
 				}
 			}
@@ -252,12 +276,30 @@ func parseGradleFiles(paths []string, relTo func(string) string) *GradleInfo {
 		}
 	}
 
+	if g.BillingVersion == 0 && billingRef != "" {
+		if raw, ok := versionStrings[billingRef]; ok {
+			if major, err := strconv.Atoi(strings.SplitN(raw, ".", 2)[0]); err == nil {
+				g.BillingVersion, g.BillingVersionRaw = major, raw
+				g.BillingFile, g.BillingLine = billingRefFile, billingRefLine
+			}
+		}
+	}
+
 	if g.TargetSDK == 0 && refExpr != "" {
 		if v, ok := resolveSDKRef(refExpr, symbols); ok {
 			g.TargetSDK, g.TargetSDKFile, g.TargetSDKLine = v, refFile, refLine
 		}
 	}
 	return g
+}
+
+// lastIdentSegment returns the final segment of a dotted reference, e.g.
+// "libs.versions.billing" -> "billing".
+func lastIdentSegment(ref string) string {
+	if i := strings.LastIndex(ref, "."); i >= 0 && i+1 < len(ref) {
+		return ref[i+1:]
+	}
+	return ref
 }
 
 // resolveSDKRef resolves a targetSdk expression against the collected symbols.

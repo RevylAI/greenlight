@@ -53,7 +53,9 @@ func Detect(root string) bool {
 // A directory with no Android sources is not an error; it returns a result with
 // no manifest and no findings, so the caller can run this unconditionally.
 func Scan(root string) (*ScanResult, error) {
-	result := &ScanResult{ProjectPath: root}
+	// Findings starts non-nil so a clean scan serializes as [] rather than
+	// null, which consumers parsing the JSON should not have to special-case.
+	result := &ScanResult{ProjectPath: root, Findings: []Finding{}}
 
 	manifestPath, gradlePaths := discover(root)
 	if manifestPath == "" && len(gradlePaths) == 0 {
@@ -167,18 +169,38 @@ func discover(root string) (manifestPath string, gradlePaths []string) {
 		}
 		return manifests[i] < manifests[j]
 	})
+
+	// The manifest is chosen first so Gradle ranking can be tied to the module
+	// that manifest belongs to. Without that link, a repo whose app module is
+	// not named "app" ranks its build files no higher than a library's, and the
+	// scan can report a library module's targetSdk as the app's.
+	if len(manifests) > 0 {
+		manifestPath = selectAppManifest(manifests)
+	}
+	appModule := moduleDirOf(manifestPath)
+
 	sort.Slice(gradles, func(i, j int) bool {
-		si, sj := gradleScore(gradles[i]), gradleScore(gradles[j])
+		si, sj := gradleScore(gradles[i], appModule), gradleScore(gradles[j], appModule)
 		if si != sj {
 			return si > sj
 		}
 		return gradles[i] < gradles[j]
 	})
 
-	if len(manifests) > 0 {
-		manifestPath = selectAppManifest(manifests)
-	}
 	return manifestPath, gradles
+}
+
+// moduleDirOf returns the Gradle module directory a manifest belongs to, i.e.
+// the path above its source set. Empty when there is no manifest to anchor to.
+func moduleDirOf(manifestPath string) string {
+	if manifestPath == "" {
+		return ""
+	}
+	p := filepath.ToSlash(manifestPath)
+	if i := strings.Index(p, "/src/"); i > 0 {
+		return p[:i]
+	}
+	return filepath.ToSlash(filepath.Dir(p))
 }
 
 // selectAppManifest picks the shipped application's manifest out of every
@@ -237,10 +259,16 @@ func manifestScore(path string) int {
 // The app module's own android {} block wins, then the convention plugin that
 // configures application modules, then other build-logic sources, then the
 // version catalog those files interpolate from.
-func gradleScore(path string) int {
+func gradleScore(path string, appModule string) int {
 	p := filepath.ToSlash(path)
 	base := strings.ToLower(filepath.Base(p))
 	score := 0
+
+	// A build file sitting in the same module as the app's manifest is the
+	// app's own, whatever that module happens to be called.
+	if appModule != "" && strings.HasPrefix(p, appModule+"/") {
+		score += 20
+	}
 
 	switch {
 	case isGradleProperties(base):
@@ -262,7 +290,9 @@ func gradleScore(path string) int {
 		}
 	case strings.HasPrefix(base, "build.gradle"):
 		score += 5
-		if strings.Contains(p, "/app/") {
+		// Fallback for the conventional module name when there is no manifest
+		// to anchor to (a Gradle-only scan).
+		if appModule == "" && strings.Contains(p, "/app/") {
 			score += 10
 		}
 	case strings.HasPrefix(base, "settings.gradle"):
