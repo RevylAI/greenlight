@@ -7,20 +7,28 @@ import (
 
 	"github.com/RevylAI/greenlight/internal/codescan"
 	"github.com/RevylAI/greenlight/internal/ipa"
+	"github.com/RevylAI/greenlight/internal/playscan"
 	"github.com/RevylAI/greenlight/internal/privacy"
 )
 
 // Finding is the unified finding type across all scanners.
 type Finding struct {
-	Source    string `json:"source"`   // "codescan", "privacy", "ipa", "metadata"
-	Severity  string `json:"severity"` // "CRITICAL", "WARN", "INFO"
+	Source   string `json:"source"`   // "codescan", "privacy", "ipa", "metadata", "playscan"
+	Severity string `json:"severity"` // "CRITICAL", "HIGH", "WARN", "INFO"
+	// Guideline is an Apple review guideline section ("5.1.1") for iOS
+	// findings, or a named Google Play policy ("Target API level") for Android
+	// ones. Play policies are named rather than numbered.
 	Guideline string `json:"guideline,omitempty"`
 	Title     string `json:"title"`
 	Detail    string `json:"detail"`
 	Fix       string `json:"fix,omitempty"`
-	File      string `json:"file,omitempty"`
-	Line      int    `json:"line,omitempty"`
-	Code      string `json:"code,omitempty"`
+	// Doc links the policy or guideline page the finding is based on. Play
+	// policy pages change often enough that citing the source is worth more
+	// than a section number alone.
+	Doc  string `json:"doc,omitempty"`
+	File string `json:"file,omitempty"`
+	Line int    `json:"line,omitempty"`
+	Code string `json:"code,omitempty"`
 }
 
 // Result holds the combined output from all scanners.
@@ -41,6 +49,11 @@ type Result struct {
 	HasPrivacyInfo bool     `json:"has_privacy_info"`
 	DetectedAPIs   []string `json:"detected_apis,omitempty"`
 	TrackingSDKs   []string `json:"tracking_sdks,omitempty"`
+
+	// Android context, populated when an Android project is detected.
+	IsAndroid   bool   `json:"is_android,omitempty"`
+	PackageName string `json:"package_name,omitempty"`
+	TargetSDK   int    `json:"target_sdk,omitempty"`
 }
 
 // Summary provides aggregate counts.
@@ -71,81 +84,133 @@ func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
 		wg sync.WaitGroup
 	)
 
-	// Channel for collecting errors (non-fatal; we report what we can)
-	errs := make(chan error, 4)
+	// The Apple scanners run unless the project is unambiguously Android-only.
+	// Skipping them there is what stops an Android repo being told it is
+	// missing a PrivacyInfo.xcprivacy; anywhere else — including a project
+	// that is both, and a project that is neither — they run exactly as before.
+	isIOS, isAndroid := DetectPlatforms(projectPath)
+	runApple := isIOS || !isAndroid
+	result.IsAndroid = isAndroid
+
+	// Channel for collecting errors (non-fatal; we report what we can).
+	// Buffered above the number of possible senders: the channel is drained
+	// only after wg.Wait(), so a full buffer would deadlock the scan.
+	errs := make(chan error, 8)
 
 	// 1. Local metadata checks
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		findings, meta := CheckLocalMetadata(projectPath)
-		mu.Lock()
-		result.Findings = append(result.Findings, findings...)
-		if meta.AppName != "" {
-			result.AppName = meta.AppName
-		}
-		if meta.BundleID != "" {
-			result.BundleID = meta.BundleID
-		}
-		mu.Unlock()
-	}()
+	if runApple {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			findings, meta := CheckLocalMetadata(projectPath)
+			mu.Lock()
+			result.Findings = append(result.Findings, findings...)
+			if meta.AppName != "" {
+				result.AppName = meta.AppName
+			}
+			if meta.BundleID != "" {
+				result.BundleID = meta.BundleID
+			}
+			mu.Unlock()
+		}()
+
+	}
 
 	// 2. Code scan
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		scanner := codescan.NewScannerWithConfig(projectPath, verbose, cfg)
-		findings, err := scanner.Scan()
-		if err != nil {
-			errs <- err
-			return
-		}
-		mu.Lock()
-		for _, f := range findings {
-			result.Findings = append(result.Findings, Finding{
-				Source:    "codescan",
-				Severity:  f.Severity.String(),
-				Guideline: f.Guideline,
-				Title:     f.Title,
-				Detail:    f.Detail,
-				Fix:       f.Fix,
-				File:      f.File,
-				Line:      f.Line,
-				Code:      f.Code,
-			})
-		}
-		mu.Unlock()
-	}()
+	if runApple {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			scanner := codescan.NewScannerWithConfig(projectPath, verbose, cfg)
+			findings, err := scanner.Scan()
+			if err != nil {
+				errs <- err
+				return
+			}
+			mu.Lock()
+			for _, f := range findings {
+				result.Findings = append(result.Findings, Finding{
+					Source:    "codescan",
+					Severity:  f.Severity.String(),
+					Guideline: f.Guideline,
+					Title:     f.Title,
+					Detail:    f.Detail,
+					Fix:       f.Fix,
+					File:      f.File,
+					Line:      f.Line,
+					Code:      f.Code,
+				})
+			}
+			mu.Unlock()
+		}()
+
+	}
 
 	// 3. Privacy scan
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		privResult, err := privacy.Scan(projectPath)
-		if err != nil {
-			errs <- err
-			return
-		}
-		mu.Lock()
-		result.HasPrivacyInfo = privResult.HasPrivacyInfo
-		result.DetectedAPIs = privResult.DetectedAPIs
-		result.TrackingSDKs = privResult.TrackingSDKs
-		for _, f := range privResult.Findings {
-			result.Findings = append(result.Findings, Finding{
-				Source:    "privacy",
-				Severity:  f.Severity,
-				Guideline: f.Guideline,
-				Title:     f.Title,
-				Detail:    f.Detail,
-				Fix:       f.Fix,
-				File:      f.File,
-				Line:      f.Line,
-			})
-		}
-		mu.Unlock()
-	}()
+	if runApple {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			privResult, err := privacy.Scan(projectPath)
+			if err != nil {
+				errs <- err
+				return
+			}
+			mu.Lock()
+			result.HasPrivacyInfo = privResult.HasPrivacyInfo
+			result.DetectedAPIs = privResult.DetectedAPIs
+			result.TrackingSDKs = privResult.TrackingSDKs
+			for _, f := range privResult.Findings {
+				result.Findings = append(result.Findings, Finding{
+					Source:    "privacy",
+					Severity:  f.Severity,
+					Guideline: f.Guideline,
+					Title:     f.Title,
+					Detail:    f.Detail,
+					Fix:       f.Fix,
+					File:      f.File,
+					Line:      f.Line,
+				})
+			}
+			mu.Unlock()
+		}()
 
-	// 4. IPA inspection (if path provided)
+	}
+
+	// 4. Google Play policy scan (Android projects only).
+	//
+	// A cross-platform repo satisfies both this and runApple, so it is checked
+	// against both stores in a single pass.
+	if isAndroid {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			playResult, err := playscan.Scan(projectPath)
+			if err != nil {
+				errs <- err
+				return
+			}
+			mu.Lock()
+			result.PackageName = playResult.PackageName
+			result.TargetSDK = playResult.TargetSDK
+			for _, f := range playResult.Findings {
+				result.Findings = append(result.Findings, Finding{
+					Source:    "playscan",
+					Severity:  f.Severity,
+					Guideline: f.Policy,
+					Title:     f.Title,
+					Detail:    f.Detail,
+					Fix:       f.Fix,
+					Doc:       f.Doc,
+					File:      f.File,
+					Line:      f.Line,
+				})
+			}
+			mu.Unlock()
+		}()
+	}
+
+	// 5. IPA inspection (if path provided)
 	if ipaPath != "" {
 		wg.Add(1)
 		go func() {

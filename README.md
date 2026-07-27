@@ -1,8 +1,8 @@
 # greenlight
 
-**Know before you submit.** Pre-submission compliance scanner for the Apple App Store.
+**Know before you submit.** Pre-submission compliance scanner for the Apple App Store and Google Play.
 
-Greenlight scans your app — source code, privacy manifests, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines, catching rejection risks before Apple does. Fully offline, no account, runs in under a second.
+Greenlight scans your app — source code, privacy manifests, Android manifests and Gradle builds, IPA binaries, and App Store Connect metadata — against Apple's Review Guidelines and Google Play's Developer Program Policies, catching rejection risks before the stores do. Fully offline, no account, runs in under a second.
 
 > **Optional runtime tier:** want to confirm flow-dependent guidelines (account deletion, restore purchases, Sign in with Apple) actually *work*, not just exist in source? `greenlight verify` validates them on a cloud device via [Revyl](https://revyl.com). It's entirely separate and opt-in — the static scanner above never needs it. See [`greenlight verify`](#greenlight-verify-path--runtime-flow-validation-via-revyl).
 
@@ -53,6 +53,7 @@ greenlight preflight . --output report.json     # write to file
 | **metadata** | app.json / Info.plist: name, version, bundle ID format, icon, privacy policy URL, purpose strings |
 | **codescan** | 30+ code patterns: private APIs, secrets, payment violations, missing ATT, social login, placeholders |
 | **privacy** | PrivacyInfo.xcprivacy completeness, Required Reason APIs, tracking SDKs vs ATT implementation |
+| **playscan** | Google Play: target API level deadline, restricted permissions, foreground service types, Play Billing version, manifest requirements (Android projects only) |
 | **ipa** | Binary: Info.plist keys, launch storyboard, app icons, app size, framework privacy manifests |
 
 ### `greenlight codescan [path]` — Code pattern scan
@@ -79,6 +80,81 @@ Scans Swift, Objective-C, React Native, and Expo projects for:
 - Vague Info.plist purpose strings (§5.1.1)
 - Missing encryption export-compliance declaration
 - Expo config issues (§2.1)
+
+### `greenlight playscan [path]` — Google Play policy scan
+
+```bash
+greenlight playscan /path/to/project
+greenlight playscan --apk app-release.apk   # built artifact: merged manifest
+greenlight playscan --aab app-release.aab   # app bundle
+greenlight playscan . --format json
+greenlight playscan . --exit-code           # CI gating
+```
+
+Checks an Android app against Google Play's Developer Program Policies and its
+published distribution deadlines. Android projects are also picked up
+automatically by `greenlight preflight`, including the `android/` directory of
+an Expo or React Native app, so a cross-platform repo is checked against both
+stores in one pass.
+
+**Deadlines**
+- **Target API level** — new apps and updates must target API 36 from
+  August 31, 2026; apps below API 35 already lose distribution to new users on
+  newer devices — **CRITICAL / HIGH**
+- **Play Billing Library** — v7 and below lose support August 31, 2026, and
+  there is no direct v7 → v9 upgrade path. Versions reached through a variable
+  or a version catalog `version.ref` are resolved — **HIGH**
+
+**Restricted permissions** (each needs an approved use case or declaration form)
+- SMS and Call Log — including the July 2026 change that drops phone-call
+  account verification as a permitted `READ_CALL_LOG` use
+- `MANAGE_EXTERNAL_STORAGE` (All files access)
+- `QUERY_ALL_PACKAGES`, `REQUEST_INSTALL_PACKAGES`
+- `ACCESS_BACKGROUND_LOCATION` (declaration + demo video)
+- Broad photo/video access over the system Photo Picker (API 33+)
+- Accessibility Service, VPN service, device admin — declared as a component's
+  `android:permission` rather than `<uses-permission>`
+- Overlays, usage stats
+- Contacts, ahead of the 2026 Contact Permissions policy
+
+**Manifest and build**
+- Foreground services missing the base `FOREGROUND_SERVICE` permission, or a
+  declared type missing its `FOREGROUND_SERVICE_*` permission — both throw at
+  `startForeground()` — **CRITICAL**
+- `specialUse` foreground services needing a Console justification
+- `android:exported` missing on components with an intent filter (API 31+) —
+  the package fails to install — **CRITICAL**
+- `android:debuggable="true"` — **CRITICAL**
+- `android:usesCleartextTraffic="true"`
+- Ads SDK shipped without `com.google.android.gms.permission.AD_ID`, which
+  silently returns a zeroed advertising ID
+- Account creation without the required in-app **and** web deletion paths
+
+Every finding cites the policy page it comes from.
+
+**Scanning a built artifact** (`--apk` / `--aab`)
+
+Passing a build reads the *merged* manifest, so it sees permissions contributed
+by library manifests that a source scan structurally cannot. Every policy check
+above runs against it, plus the native code checks:
+
+- **16 KB page size** — Google Play requires apps targeting Android 15+ to
+  support 16 KB memory pages. Checks ELF `LOAD` segment alignment on
+  `arm64-v8a` libraries, 16 KB zip alignment of uncompressed libraries, and
+  `GNU_RELRO` presence — **CRITICAL / HIGH**
+
+Both formats are read directly: an APK's compiled binary XML and an AAB's
+protobuf manifest are decoded in pure Go, so no Android SDK, `aapt2`, or
+`bundletool` is needed.
+
+**Scope.** Scanning *source* reads the `AndroidManifest.xml` and Gradle files in
+your repo, which is the *pre-merge* manifest. Permissions contributed by library
+manifests only appear once the build merges them, so a clean source scan is not
+proof of a clean merged manifest — scan the built artifact to close that gap.
+`targetSdk` is resolved from the app module, convention plugins
+(`build-logic/`, `buildSrc/`, `build-plugin/`), version catalogs,
+`gradle.properties`, and named constants; when it cannot be resolved the scan
+says so rather than reporting a pass.
 
 ### `greenlight privacy [path]` — Privacy manifest validator
 

@@ -41,7 +41,12 @@ Combines:
   • Code scan     — private APIs, hardcoded secrets, missing ATT, etc.
   • Privacy scan  — Required Reason APIs, PrivacyInfo.xcprivacy, tracking SDKs
   • Metadata scan — app.json / Info.plist completeness, icons, version, bundle ID
+  • Play scan     — target API level, restricted permissions, Play Billing (Android)
   • IPA inspect   — binary analysis (if --ipa is provided)
+
+Android projects are detected automatically, including the android/ directory
+of an Expo or React Native app, so a cross-platform repo is checked against
+both stores in one pass.
 
 Add --verify to continue past the static checks and validate your flow-dependent
 guidelines (account deletion, restore purchases, Sign in with Apple) on a REAL
@@ -99,7 +104,16 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		if preflightIPA != "" {
 			fmt.Printf("  IPA:     %s\n", preflightIPA)
 		}
-		scanners := []string{"metadata", "codescan", "privacy"}
+		// Mirrors the gating in preflight.Run so the banner never advertises a
+		// scanner that will not run.
+		isIOS, isAndroid := preflight.DetectPlatforms(path)
+		var scanners []string
+		if isIOS || !isAndroid {
+			scanners = append(scanners, "metadata", "codescan", "privacy")
+		}
+		if isAndroid {
+			scanners = append(scanners, "playscan")
+		}
 		if preflightIPA != "" {
 			scanners = append(scanners, "ipa")
 		}
@@ -337,9 +351,14 @@ func printPreflightFinding(w *os.File, f preflight.Finding) {
 	// Source tag
 	dim.Fprintf(w, "[%s] ", f.Source)
 
-	// Guideline + title
+	// Guideline + title. Apple guidelines are numbered sections and read well
+	// with a § prefix; Play policies are named, where § would be wrong.
 	if f.Guideline != "" {
-		bold.Fprintf(w, "§%s ", f.Guideline)
+		if isNumberedGuideline(f.Guideline) {
+			bold.Fprintf(w, "§%s ", f.Guideline)
+		} else {
+			bold.Fprintf(w, "%s: ", f.Guideline)
+		}
 	}
 	bold.Fprintln(w, f.Title)
 
@@ -366,7 +385,21 @@ func printPreflightFinding(w *os.File, f preflight.Finding) {
 		fmt.Fprintln(w, f.Fix)
 	}
 
+	// Policy source, so the developer can go read the rule themselves.
+	if f.Doc != "" {
+		dim.Fprintf(w, "             %s\n", f.Doc)
+	}
+
 	fmt.Fprintln(w)
+}
+
+// isNumberedGuideline reports whether a guideline reference is an Apple-style
+// numbered section ("5.1.1") rather than a named Play policy.
+func isNumberedGuideline(g string) bool {
+	if g == "" {
+		return false
+	}
+	return g[0] >= '0' && g[0] <= '9'
 }
 
 func printPreflightFooter(w *os.File, result *preflight.Result) {
@@ -447,6 +480,9 @@ func preflightJSONObject(result *preflight.Result) interface{} {
 		HasPrivacyInfo bool                `json:"has_privacy_info"`
 		DetectedAPIs   []string            `json:"detected_apis,omitempty"`
 		TrackingSDKs   []string            `json:"tracking_sdks,omitempty"`
+		IsAndroid      bool                `json:"is_android"`
+		PackageName    string              `json:"package_name,omitempty"`
+		TargetSDK      int                 `json:"target_sdk,omitempty"`
 		Findings       []preflight.Finding `json:"findings"`
 		Summary        preflight.Summary   `json:"summary"`
 		Elapsed        string              `json:"elapsed"`
@@ -458,6 +494,9 @@ func preflightJSONObject(result *preflight.Result) interface{} {
 		HasPrivacyInfo: result.HasPrivacyInfo,
 		DetectedAPIs:   result.DetectedAPIs,
 		TrackingSDKs:   result.TrackingSDKs,
+		IsAndroid:      result.IsAndroid,
+		PackageName:    result.PackageName,
+		TargetSDK:      result.TargetSDK,
 		Findings:       result.Findings,
 		Summary:        result.Summary,
 		Elapsed:        result.Elapsed.Round(time.Millisecond).String(),
