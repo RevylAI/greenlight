@@ -38,9 +38,16 @@ type ScanResult struct {
 	PackageName  string `json:"package_name,omitempty"`
 	TargetSDK    int    `json:"target_sdk,omitempty"`
 	MinSDK       int    `json:"min_sdk,omitempty"`
-	// Permissions lists every permission declared in the source manifest.
+	// Permissions lists every permission declared in the manifest that was read.
 	Permissions []string  `json:"permissions,omitempty"`
 	Findings    []Finding `json:"findings"`
+
+	// Archive context, set when scanning a built APK or AAB rather than source.
+	// A built archive carries the MERGED manifest, so its permission list is
+	// complete in a way a source scan's cannot be.
+	IsArchive      bool   `json:"is_archive,omitempty"`
+	ArchiveKind    string `json:"archive_kind,omitempty"`
+	NativeLibCount int    `json:"native_lib_count,omitempty"`
 }
 
 const (

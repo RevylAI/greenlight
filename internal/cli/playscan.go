@@ -17,6 +17,7 @@ var (
 	playscanFormat   string
 	playscanOutput   string
 	playscanExitCode bool
+	playscanArchive  string
 )
 
 var playscanCmd = &cobra.Command{
@@ -36,15 +37,23 @@ Checks:
   • Advertising ID        — ads SDK shipped without the AD_ID permission
   • Account deletion      — the in-app and web deletion requirement
 
+Pass --apk or --aab to scan a BUILT artifact instead of source. That reads the
+merged manifest, so it sees permissions contributed by library manifests that a
+source scan structurally cannot, and adds the native code checks:
+
+  • 16 KB page size  — ELF LOAD alignment, zip alignment, GNU_RELRO
+
 Runs entirely offline. No Play Console account needed.
 
-Scope: this reads the AndroidManifest.xml and Gradle files in your repo, which
-is the pre-merge manifest. Permissions contributed by library manifests only
-appear after the build merges them, so a clean scan is not proof of a clean
-merged manifest.
+Scope: scanning source reads the AndroidManifest.xml and Gradle files in your
+repo, which is the pre-merge manifest. Permissions contributed by library
+manifests only appear after the build merges them, so a clean source scan is
+not proof of a clean merged manifest. Scan the built artifact to close that gap.
 
 Usage:
   greenlight playscan .
+  greenlight playscan --apk app-release.apk
+  greenlight playscan --aab app-release.aab
   greenlight playscan ./android --format json
   greenlight playscan . --exit-code`,
 	Args: cobra.MaximumNArgs(1),
@@ -55,6 +64,8 @@ func init() {
 	playscanCmd.Flags().StringVar(&playscanFormat, "format", "terminal", "output format: terminal, json")
 	playscanCmd.Flags().StringVar(&playscanOutput, "output", "", "write report to file (stdout if omitted)")
 	playscanCmd.Flags().BoolVar(&playscanExitCode, "exit-code", false, "exit non-zero on any CRITICAL or HIGH finding — for CI gating")
+	playscanCmd.Flags().StringVar(&playscanArchive, "apk", "", "scan a built .apk (merged manifest + native code checks) instead of source")
+	playscanCmd.Flags().StringVar(&playscanArchive, "aab", "", "scan a built .aab (merged manifest + native code checks) instead of source")
 	rootCmd.AddCommand(playscanCmd)
 }
 
@@ -64,22 +75,44 @@ func runPlayscan(cmd *cobra.Command, args []string) error {
 		path = args[0]
 	}
 
-	info, err := os.Stat(path)
-	if err != nil {
-		return fmt.Errorf("cannot access path: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("path must be a directory: %s", path)
+	// --apk / --aab share one variable: they select the same archive scan and
+	// the format is detected from the file, so passing the wrong one is not an
+	// error the user needs to care about.
+	archive := playscanArchive
+	if archive != "" {
+		if info, err := os.Stat(archive); err != nil {
+			return fmt.Errorf("cannot access archive: %w", err)
+		} else if info.IsDir() {
+			return fmt.Errorf("--apk/--aab expects a file, not a directory: %s", archive)
+		}
+	} else {
+		info, err := os.Stat(path)
+		if err != nil {
+			return fmt.Errorf("cannot access path: %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("path must be a directory: %s", path)
+		}
 	}
 
 	isJSON := strings.ToLower(playscanFormat) == "json"
 	if !isJSON {
 		purple.Println("\n  greenlight playscan — know before you upload to Google Play.")
-		fmt.Printf("  Project: %s\n\n", path)
+		if archive != "" {
+			fmt.Printf("  Archive: %s\n\n", archive)
+		} else {
+			fmt.Printf("  Project: %s\n\n", path)
+		}
 	}
 
 	start := time.Now()
-	result, err := playscan.Scan(path)
+	var result *playscan.ScanResult
+	var err error
+	if archive != "" {
+		result, err = playscan.ScanArchive(archive)
+	} else {
+		result, err = playscan.Scan(path)
+	}
 	if err != nil {
 		return fmt.Errorf("play scan failed: %w", err)
 	}
@@ -130,6 +163,9 @@ func printPlayscanReport(w *os.File, result *playscan.ScanResult, elapsed time.D
 	}
 
 	// Project context
+	if result.ArchiveKind != "" {
+		fmt.Fprintf(w, "  Format:     %s (merged manifest)\n", result.ArchiveKind)
+	}
 	if result.PackageName != "" {
 		fmt.Fprintf(w, "  Package:    %s\n", result.PackageName)
 	}
@@ -138,6 +174,9 @@ func printPlayscanReport(w *os.File, result *playscan.ScanResult, elapsed time.D
 	}
 	if result.ManifestPath != "" {
 		fmt.Fprintf(w, "  Manifest:   %s\n", result.ManifestPath)
+	}
+	if result.IsArchive {
+		fmt.Fprintf(w, "  Native libs: %d\n", result.NativeLibCount)
 	}
 	fmt.Fprintln(w)
 

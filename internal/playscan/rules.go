@@ -19,6 +19,7 @@ const (
 	docAppContent      = "https://support.google.com/googleplay/android-developer/answer/9859455"
 	docProgramPolicy   = "https://support.google.com/googleplay/android-developer/answer/16810878"
 	docJul2026Policy   = "https://support.google.com/googleplay/android-developer/answer/17134731"
+	docPageSizes       = "https://developer.android.com/guide/practices/page-sizes"
 )
 
 // Google Play's published requirements, as of the 2026 cycle.
