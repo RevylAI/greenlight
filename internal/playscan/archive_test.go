@@ -147,6 +147,10 @@ func writeChunkTo(w *bytes.Buffer, chunkType uint16, payload []byte) {
 // forms that matter: a string permission name, a boolean, an integer SDK
 // level, and a foregroundServiceType bitmask.
 func buildTestManifest() []byte {
+	return buildTestManifestWithSplit("")
+}
+
+func buildTestManifestWithSplit(split string) []byte {
 	b := &axmlBuilder{}
 	nameAttr := b.attrRef(0x01010003)
 	debuggableAttr := b.attrRef(0x0101000f)
@@ -163,9 +167,17 @@ func buildTestManifest() []byte {
 	launcherIdx := b.str("android.intent.category.LAUNCHER")
 	packageAttr := b.str("package")
 
-	b.startTag("manifest", []buildAttr{
+	manifestAttrs := []buildAttr{
 		{nameIdx: packageAttr, dataType: typeString, data: pkgIdx, rawIdx: pkgIdx},
-	})
+	}
+	if split != "" {
+		splitAttr := b.str("split")
+		splitIdx := b.str(split)
+		manifestAttrs = append(manifestAttrs, buildAttr{
+			nameIdx: splitAttr, dataType: typeString, data: splitIdx, rawIdx: splitIdx,
+		})
+	}
+	b.startTag("manifest", manifestAttrs)
 	b.startTag("uses-permission", []buildAttr{
 		{nameIdx: nameAttr, dataType: typeString, data: permIdx, rawIdx: permIdx},
 	})
@@ -310,6 +322,11 @@ func buildTestELF(align uint64, relro bool) []byte {
 // native libraries.
 func buildTestAPK(t *testing.T, libs map[string][]byte) string {
 	t.Helper()
+	return buildTestAPKWithManifest(t, buildTestManifest(), libs)
+}
+
+func buildTestAPKWithManifest(t *testing.T, manifest []byte, libs map[string][]byte) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "app.apk")
 	f, err := os.Create(path)
 	if err != nil {
@@ -322,7 +339,7 @@ func buildTestAPK(t *testing.T, libs map[string][]byte) string {
 	if err != nil {
 		t.Fatalf("zip create: %v", err)
 	}
-	if _, err := mw.Write(buildTestManifest()); err != nil {
+	if _, err := mw.Write(manifest); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
 	for name, data := range libs {
@@ -869,6 +886,54 @@ func TestScanArchive64BitParity(t *testing.T) {
 		}
 	})
 
+	t.Run("partial library gap is named", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/armeabi-v7a/libzeta.so": buildTestELF(16384, true),
+			"lib/armeabi-v7a/libfoo.so":  buildTestELF(16384, true),
+			"lib/armeabi-v7a/libbar.so":  buildTestELF(16384, true),
+			"lib/arm64-v8a/libfoo.so":    buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		f := findByPolicy(res.Findings, "64-bit requirement")
+		if f == nil {
+			t.Fatal("a 32-bit library without a matching 64-bit build was not flagged")
+		}
+		if f.Severity != sevHigh {
+			t.Errorf("severity = %v, want HIGH", f.Severity)
+		}
+		if !strings.Contains(f.Detail, "libbar.so, libzeta.so") {
+			t.Errorf("detail should name missing libraries in sorted order: %s", f.Detail)
+		}
+		if strings.Contains(f.Detail, "libfoo.so") {
+			t.Errorf("detail should not name a library that has a 64-bit build: %s", f.Detail)
+		}
+	})
+
+	t.Run("whole and partial gaps are reported separately", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/armeabi-v7a/libfoo.so": buildTestELF(16384, true),
+			"lib/armeabi-v7a/libbar.so": buildTestELF(16384, true),
+			"lib/arm64-v8a/libfoo.so":   buildTestELF(16384, true),
+			"lib/x86/libnative.so":      buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if got := countByPolicy(res.Findings, "64-bit requirement"); got != 2 {
+			t.Fatalf("64-bit findings = %d, want one CRITICAL and one HIGH", got)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f.Severity != sevCritical {
+			t.Errorf("first 64-bit finding severity = %v, want CRITICAL", f.Severity)
+		}
+		if f := findByTitle(res.Findings, "32-bit native libraries are missing 64-bit builds"); f == nil || f.Severity != sevHigh {
+			t.Errorf("partial gap finding = %+v, want HIGH", f)
+		}
+	})
+
 	t.Run("both ABIs present is clean", func(t *testing.T) {
 		apk := buildTestAPK(t, map[string][]byte{
 			"lib/armeabi-v7a/libnative.so": buildTestELF(16384, true),
@@ -893,6 +958,30 @@ func TestScanArchive64BitParity(t *testing.T) {
 		}
 		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
 			t.Errorf("a 64-bit-only app should not be flagged: %s", f.Title)
+		}
+	})
+
+	t.Run("no native code is clean", func(t *testing.T) {
+		apk := buildTestAPK(t, nil)
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
+			t.Errorf("an app without native code should not be flagged: %s", f.Title)
+		}
+	})
+
+	t.Run("config split is exempt", func(t *testing.T) {
+		apk := buildTestAPKWithManifest(t, buildTestManifestWithSplit("config.armeabi_v7a"), map[string][]byte{
+			"lib/armeabi-v7a/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
+			t.Errorf("a config split should not be checked in isolation: %s", f.Title)
 		}
 	})
 

@@ -159,32 +159,67 @@ func check64BitParity(libs []nativeLib) []Finding {
 		return nil
 	}
 
-	present := make(map[string]bool)
+	libsByABI := make(map[string]map[string]bool)
 	for _, lib := range libs {
-		present[lib.ABI] = true
+		if libsByABI[lib.ABI] == nil {
+			libsByABI[lib.ABI] = make(map[string]bool)
+		}
+		libsByABI[lib.ABI][path.Base(lib.Path)] = true
 	}
 
-	var missing []string
+	var missingABIs, partialGaps []string
 	for abi32, abi64 := range abi64For {
-		if present[abi32] && !present[abi64] {
-			missing = append(missing, fmt.Sprintf("%s is present with no %s", abi32, abi64))
+		libs32 := libsByABI[abi32]
+		if len(libs32) == 0 {
+			continue
+		}
+		libs64 := libsByABI[abi64]
+		if len(libs64) == 0 {
+			missingABIs = append(missingABIs, fmt.Sprintf("%s is present with no %s", abi32, abi64))
+			continue
+		}
+
+		var missingLibs []string
+		for name := range libs32 {
+			if !libs64[name] {
+				missingLibs = append(missingLibs, name)
+			}
+		}
+		if len(missingLibs) > 0 {
+			sort.Strings(missingLibs)
+			partialGaps = append(partialGaps, fmt.Sprintf(
+				"%s -> %s: %s", abi32, abi64, strings.Join(missingLibs, ", "),
+			))
 		}
 	}
-	if len(missing) == 0 {
-		return nil
-	}
-	sort.Strings(missing)
+	sort.Strings(missingABIs)
+	sort.Strings(partialGaps)
 
-	return []Finding{{
-		Severity: sevCritical,
-		Policy:   "64-bit requirement",
-		Title:    "32-bit native code ships without its 64-bit counterpart",
-		Detail: "Google Play requires every app with native code to provide a 64-bit library for each 32-bit ABI it supports. " +
-			strings.Join(missing, "; ") + ". Play rejects a bundle that carries only 32-bit native code for an ABI.",
-		Fix: "Add the 64-bit ABIs to your NDK build (abiFilters or ndk.abiFilters), rebuild, and confirm every dependency ships 64-bit libraries too. " +
-			"Dropping the 32-bit ABI entirely also satisfies the requirement.",
-		Doc: doc64Bit,
-	}}
+	var findings []Finding
+	if len(missingABIs) > 0 {
+		findings = append(findings, Finding{
+			Severity: sevCritical,
+			Policy:   "64-bit requirement",
+			Title:    "32-bit native code ships without its 64-bit counterpart",
+			Detail: "Google Play requires every app with native code to provide a 64-bit library for each 32-bit ABI it supports. " +
+				strings.Join(missingABIs, "; ") + ". Play rejects a bundle that carries only 32-bit native code for an ABI.",
+			Fix: "Add the 64-bit ABIs to your NDK build (abiFilters or ndk.abiFilters), rebuild, and confirm every dependency ships 64-bit libraries too. " +
+				"Dropping the 32-bit ABI entirely also satisfies the requirement.",
+			Doc: doc64Bit,
+		})
+	}
+	if len(partialGaps) > 0 {
+		findings = append(findings, Finding{
+			Severity: sevHigh,
+			Policy:   "64-bit requirement",
+			Title:    "32-bit native libraries are missing 64-bit builds",
+			Detail: "These 32-bit libraries have no matching build in the corresponding 64-bit ABI: " +
+				strings.Join(partialGaps, "; ") + ". Calling System.loadLibrary for one of them on a 64-bit-only device fails with UnsatisfiedLinkError.",
+			Fix: "Build each named library for the corresponding 64-bit ABI, or remove its 32-bit build if that ABI is no longer supported.",
+			Doc: doc64Bit,
+		})
+	}
+	return findings
 }
 
 // classifyArchive determines the format and locates the manifest entry.
