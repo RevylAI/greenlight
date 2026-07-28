@@ -251,6 +251,11 @@ func decodeStartTag(chunk []byte, pool []string, resMap []uint32) (string, []axm
 // names. aapt2 commonly emits an empty string-pool entry for a framework
 // attribute and identifies it only by resource ID, so without this table every
 // android:* attribute in a compiled manifest reads as unnamed.
+// Every value here was read back from aapt2 rather than recalled, via
+// `aapt2 dump xmltree` on a manifest declaring each attribute, and confirmed
+// identical against android-34, android-35, and android-36. Framework resource
+// IDs are assigned once and never change, so a wrong entry is silently wrong
+// forever: the attribute simply never resolves and its rules stop firing.
 var frameworkAttrIDs = map[uint32]string{
 	0x01010003: "name",
 	0x01010006: "permission",
@@ -260,9 +265,7 @@ var frameworkAttrIDs = map[uint32]string{
 	0x01010270: "targetSdkVersion",
 	0x01010280: "allowBackup",
 	0x010104ec: "usesCleartextTraffic",
-	0x0101048f: "networkSecurityConfig",
-	0x01010507: "networkSecurityConfig",
-	0x01010596: "foregroundServiceType",
+	0x01010599: "foregroundServiceType",
 }
 
 // attrName resolves an attribute's name, preferring the string pool and

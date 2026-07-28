@@ -152,7 +152,7 @@ func buildTestManifest() []byte {
 	debuggableAttr := b.attrRef(0x0101000f)
 	targetSdkAttr := b.attrRef(0x01010270)
 	exportedAttr := b.attrRef(0x01010010)
-	fgsAttr := b.attrRef(0x01010596)
+	fgsAttr := b.attrRef(0x01010599) // verified against aapt2, see TestFrameworkAttrIDsMatchAapt2
 
 	pkgIdx := b.str("com.example.built")
 	permIdx := b.str("android.permission.READ_SMS")
@@ -717,5 +717,57 @@ func TestDecodeStartTagCapsAttrCountToChunkSize(t *testing.T) {
 	}
 	if c := cap(attrs); c > 8 {
 		t.Errorf("allocated capacity %d for a chunk with room for 0 attributes", c)
+	}
+}
+
+// Framework attribute resource IDs are the fallback when aapt2 omits an
+// attribute's name from the string pool, which it routinely does. A wrong ID
+// fails silently: the attribute never resolves and its rules stop firing.
+//
+// These values were read back from `aapt2 dump xmltree` on a manifest
+// declaring each one, and are identical on android-34, -35 and -36. An earlier
+// hand-recalled value for foregroundServiceType (0x01010596) was wrong, which
+// would have disabled the CRITICAL foreground-service checks on any manifest
+// that relied on the fallback.
+func TestFrameworkAttrIDsMatchAapt2(t *testing.T) {
+	verified := map[uint32]string{
+		0x01010003: "name",
+		0x01010006: "permission",
+		0x0101000f: "debuggable",
+		0x01010010: "exported",
+		0x0101020c: "minSdkVersion",
+		0x01010270: "targetSdkVersion",
+		0x01010280: "allowBackup",
+		0x010104ec: "usesCleartextTraffic",
+		0x01010599: "foregroundServiceType",
+	}
+	for id, name := range verified {
+		got, ok := frameworkAttrIDs[id]
+		if !ok {
+			t.Errorf("resource ID %#x (%s) missing from the table", id, name)
+			continue
+		}
+		if got != name {
+			t.Errorf("resource ID %#x maps to %q, want %q", id, got, name)
+		}
+	}
+	for id, name := range frameworkAttrIDs {
+		if _, ok := verified[id]; !ok {
+			t.Errorf("table carries unverified resource ID %#x (%q); confirm it with aapt2 before adding", id, name)
+		}
+	}
+}
+
+// The fallback must actually resolve when the string pool entry is empty,
+// which is the only situation the table exists for.
+func TestAttrNameFallsBackToResourceMap(t *testing.T) {
+	pool := []string{""}
+	resMap := []uint32{0x01010599}
+	if got := attrName(pool, resMap, 0); got != "foregroundServiceType" {
+		t.Errorf("attrName with an empty pool entry = %q, want foregroundServiceType", got)
+	}
+	// A populated pool entry always wins over the map.
+	if got := attrName([]string{"exported"}, []uint32{0x01010599}, 0); got != "exported" {
+		t.Errorf("string pool name should take precedence, got %q", got)
 	}
 }
