@@ -96,8 +96,9 @@ func ScanArchive(archivePath string) (*ScanResult, error) {
 
 		ctx := &ruleContext{
 			manifest: manifest,
-			// A built archive carries no Gradle state; rules that read it are
-			// source-only and correctly stay silent.
+			// A built archive carries no Gradle state, so rules that read it
+			// cannot fire here. That is a coverage gap rather than a pass, and
+			// gradleOnlyCoverageFinding below says so instead of staying silent.
 			gradle:       &GradleInfo{},
 			targetSDK:    result.TargetSDK,
 			manifestFile: manifestEntry,
@@ -107,11 +108,83 @@ func ScanArchive(archivePath string) (*ScanResult, error) {
 		}
 	}
 
+	// The Gradle-only gap exists whether or not the manifest decoded, so this
+	// sits outside the block above.
+	result.Findings = append(result.Findings, gradleOnlyCoverageFinding(archivePath))
+
 	libs := collectNativeLibs(&zr.Reader, kind)
 	result.NativeLibCount = len(libs)
 	result.Findings = append(result.Findings, checkPageAlignment(libs, kind)...)
 
+	// ABI parity is a property of the whole app. A config split legitimately
+	// carries one ABI, so running the rule against it would report a violation
+	// that does not exist in the release it belongs to.
+	isSplit := manifest != nil && strings.TrimSpace(manifest.Split) != ""
+	if !isSplit {
+		result.Findings = append(result.Findings, check64BitParity(libs)...)
+	}
+
 	return result, nil
+}
+
+// gradleOnlyCoverageFinding names the checks an artifact scan cannot perform.
+// Play Billing version, ads-SDK detection, and auth-SDK detection all read the
+// Gradle model, which a built archive does not carry. Reporting the gap keeps a
+// clean artifact scan from reading as a clean scan of everything.
+func gradleOnlyCoverageFinding(archivePath string) Finding {
+	return Finding{
+		Severity: sevInfo,
+		Policy:   "Scan coverage",
+		Title:    "Dependency-based checks were skipped for this artifact",
+		Detail: "A built archive carries no Gradle state, so these source-only checks did not run: " +
+			"Play Billing Library version, ads-SDK detection (the AD_ID permission check), and auth-SDK detection " +
+			"(the account-deletion requirement). Manifest, permission, and native code checks all ran normally.",
+		Fix:  "Run `greenlight playscan .` against the project source as well. The two scans are complementary: source sees dependencies, the artifact sees the merged manifest.",
+		File: archivePath,
+	}
+}
+
+// abi64For maps each 32-bit ABI Play recognises to the 64-bit ABI that must
+// ship alongside it.
+var abi64For = map[string]string{
+	"armeabi-v7a": "arm64-v8a",
+	"x86":         "x86_64",
+}
+
+// check64BitParity enforces Google Play's 64-bit requirement: an app that ships
+// a 32-bit native ABI must ship the matching 64-bit ABI too. An app with no
+// native code is unaffected, as is one that is already 64-bit only.
+func check64BitParity(libs []nativeLib) []Finding {
+	if len(libs) == 0 {
+		return nil
+	}
+
+	present := make(map[string]bool)
+	for _, lib := range libs {
+		present[lib.ABI] = true
+	}
+
+	var missing []string
+	for abi32, abi64 := range abi64For {
+		if present[abi32] && !present[abi64] {
+			missing = append(missing, fmt.Sprintf("%s is present with no %s", abi32, abi64))
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+
+	return []Finding{{
+		Severity: sevCritical,
+		Policy:   "64-bit requirement",
+		Title:    "32-bit native code ships without its 64-bit counterpart",
+		Detail: "Google Play requires every app with native code to provide a 64-bit library for each 32-bit ABI it supports. " +
+			strings.Join(missing, "; ") + ". Play rejects a bundle that carries only 32-bit native code for an ABI.",
+		Fix: "Add the 64-bit ABIs to your NDK build (abiFilters or ndk.abiFilters), rebuild, and confirm every dependency ships 64-bit libraries too. " +
+			"Dropping the 32-bit ABI entirely also satisfies the requirement.",
+		Doc: doc64Bit,
+	}}
 }
 
 // classifyArchive determines the format and locates the manifest entry.
@@ -148,15 +221,18 @@ func readZipEntry(zr *zip.Reader, name string) ([]byte, error) {
 
 // collectNativeLibs finds every packaged .so and reads what the alignment
 // checks need. Both archive layouts are handled.
+//
+// An APK holds native code at lib/<abi>/. An AAB holds it at <module>/lib/<abi>/,
+// and a bundle has one module directory per feature module on top of "base", so
+// scanning only base/ misses native code that ships in a feature module.
 func collectNativeLibs(zr *zip.Reader, kind ArchiveKind) []nativeLib {
-	prefix := "lib/"
-	if kind == KindAAB {
-		prefix = "base/lib/"
-	}
-
 	var libs []nativeLib
 	for _, f := range zr.File {
-		if !strings.HasPrefix(f.Name, prefix) || !strings.HasSuffix(f.Name, ".so") {
+		if !strings.HasSuffix(f.Name, ".so") {
+			continue
+		}
+		prefix, ok := nativeLibPrefix(f.Name, kind)
+		if !ok {
 			continue
 		}
 		lib := nativeLib{
@@ -187,6 +263,28 @@ func collectNativeLibs(zr *zip.Reader, kind ArchiveKind) []nativeLib {
 
 	sort.Slice(libs, func(i, j int) bool { return libs[i].Path < libs[j].Path })
 	return libs
+}
+
+// nativeLibPrefix reports the "<...>lib/" prefix a packaged .so sits under, and
+// whether the entry is native code at all. For an AAB any top-level module
+// qualifies, so feature-module native code is scanned alongside base/.
+func nativeLibPrefix(name string, kind ArchiveKind) (string, bool) {
+	if kind != KindAAB {
+		if strings.HasPrefix(name, "lib/") {
+			return "lib/", true
+		}
+		return "", false
+	}
+	// <module>/lib/<abi>/<file>.so
+	slash := strings.Index(name, "/")
+	if slash <= 0 {
+		return "", false
+	}
+	prefix := name[:slash+1] + "lib/"
+	if !strings.HasPrefix(name, prefix) {
+		return "", false
+	}
+	return prefix, true
 }
 
 func abiFromPath(name, prefix string) string {

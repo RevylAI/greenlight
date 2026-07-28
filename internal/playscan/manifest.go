@@ -14,18 +14,80 @@ import (
 // working on manifests that bind the android prefix unusually or omit the
 // xmlns declaration entirely (both appear in real generated manifests).
 type Manifest struct {
-	XMLName     xml.Name         `xml:"manifest"`
-	Package     string           `xml:"package,attr"`
+	XMLName xml.Name `xml:"manifest"`
+	Package string   `xml:"package,attr"`
+	// Split names the split APK this manifest belongs to ("config.armeabi_v7a",
+	// a feature module name). A split carries only part of the app, so
+	// whole-app rules that depend on seeing everything must not run on one.
+	Split       string           `xml:"split,attr"`
 	Permissions []UsesPermission `xml:"uses-permission"`
 	// PermissionsSDK23 covers <uses-permission-sdk-23>, which grants the same
 	// policy obligations as a plain <uses-permission>.
 	PermissionsSDK23 []UsesPermission `xml:"uses-permission-sdk-23"`
 	UsesSDK          *UsesSDK         `xml:"uses-sdk"`
+	UsesFeatures     []UsesFeature    `xml:"uses-feature"`
 	Application      *Application     `xml:"application"`
 }
 
 type UsesPermission struct {
 	Name string `xml:"name,attr"`
+}
+
+type UsesFeature struct {
+	Name string `xml:"name,attr"`
+	// Required is the raw android:required attribute. It defaults to true when
+	// absent, and a phone app that also ships to TV declares leanback with
+	// required="false" — so an unrequired feature must not move the app off the
+	// phone track.
+	Required string `xml:"required,attr"`
+}
+
+// isRequired reports whether the feature is required, which is the default when
+// the attribute is absent or unparseable.
+func (f UsesFeature) isRequired() bool {
+	return !strings.EqualFold(strings.TrimSpace(f.Required), "false")
+}
+
+// FormFactor is the Play distribution channel an app targets. Play sets target
+// API level requirements per form factor, so a Wear or TV app is not held to
+// the phone schedule.
+type FormFactor string
+
+const (
+	FormFactorPhone      FormFactor = "phone"
+	FormFactorWear       FormFactor = "Wear OS"
+	FormFactorTV         FormFactor = "Android TV"
+	FormFactorAutomotive FormFactor = "Android Automotive"
+	FormFactorXR         FormFactor = "Android XR"
+)
+
+// featureFormFactors maps the <uses-feature> declaration that puts an app on a
+// non-phone Play track to that form factor.
+var featureFormFactors = map[string]FormFactor{
+	"android.hardware.type.watch":       FormFactorWear,
+	"android.hardware.type.television":  FormFactorTV,
+	"android.software.leanback":         FormFactorTV,
+	"android.hardware.type.automotive":  FormFactorAutomotive,
+	"android.software.xr.immersive":     FormFactorXR,
+	"android.hardware.xr.head_tracking": FormFactorXR,
+}
+
+// FormFactor reports the non-phone form factor this manifest declares, or
+// FormFactorPhone when it declares none. Phone and tablet share one schedule,
+// so they are not distinguished.
+func (m *Manifest) FormFactor() FormFactor {
+	if m == nil {
+		return FormFactorPhone
+	}
+	for _, f := range m.UsesFeatures {
+		if !f.isRequired() {
+			continue
+		}
+		if ff, ok := featureFormFactors[f.Name]; ok {
+			return ff
+		}
+	}
+	return FormFactorPhone
 }
 
 type UsesSDK struct {

@@ -20,6 +20,7 @@ const (
 	docProgramPolicy   = "https://support.google.com/googleplay/android-developer/answer/16810878"
 	docJul2026Policy   = "https://support.google.com/googleplay/android-developer/answer/17134731"
 	docPageSizes       = "https://developer.android.com/guide/practices/page-sizes"
+	doc64Bit           = "https://developer.android.com/google/play/requirements/64-bit"
 )
 
 // Google Play's published requirements, as of the 2026 cycle.
@@ -57,6 +58,15 @@ type ruleContext struct {
 
 func (c *ruleContext) hasPermission(name string) bool {
 	return c.manifest != nil && c.manifest.HasPermission(name)
+}
+
+// formFactor reports the Play track this app ships on, defaulting to phone when
+// there is no manifest to read.
+func (c *ruleContext) formFactor() FormFactor {
+	if c.manifest == nil {
+		return FormFactorPhone
+	}
+	return c.manifest.FormFactor()
 }
 
 type rule func(*ruleContext) []Finding
@@ -98,6 +108,32 @@ func ruleTargetAPILevel(c *ruleContext) []Finding {
 	if file == "" {
 		file = c.manifestFile
 		line = 0
+	}
+
+	// Play publishes a separate target API schedule per form factor. Holding a
+	// Wear, TV, Automotive, or XR app to the phone schedule produces a blocking
+	// finding Play would not produce, so report it without gating the build.
+	//
+	// An unresolved targetSdk falls through to the shared "could not determine"
+	// finding below, because not knowing the value is worth reporting on every
+	// track.
+	if ff := c.formFactor(); ff != FormFactorPhone && c.targetSDK != 0 {
+		if c.targetSDK >= requiredTargetSDKNew {
+			return nil
+		}
+		return []Finding{{
+			Severity: sevWarn,
+			Policy:   "Target API level",
+			Title:    fmt.Sprintf("targetSdk %d is below the phone requirement, and this is a %s app", c.targetSDK, ff),
+			Detail: fmt.Sprintf(
+				"This manifest declares a %s app, which Play holds to its own target API schedule rather than the phone and tablet one. "+
+					"targetSdk %d is below the API %d the phone track requires from August 31, 2026, but the deadline that applies here is the %s schedule.",
+				ff, c.targetSDK, requiredTargetSDKNew, ff),
+			Fix:  fmt.Sprintf("Check the target API level Play requires for %s and confirm this app meets it. If the app also ships to phones, raise targetSdk to %d.", ff, requiredTargetSDKNew),
+			Doc:  docTargetAPI,
+			File: file,
+			Line: line,
+		}}
 	}
 
 	if c.targetSDK == 0 {

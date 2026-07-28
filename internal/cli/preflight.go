@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -17,6 +18,8 @@ import (
 
 var (
 	preflightIPA      string
+	preflightAPK      string
+	preflightAAB      string
 	preflightFormat   string
 	preflightOutput   string
 	preflightExitCode bool
@@ -63,6 +66,8 @@ Usage:
 
 func init() {
 	preflightCmd.Flags().StringVar(&preflightIPA, "ipa", "", "path to .ipa file for binary inspection")
+	preflightCmd.Flags().StringVar(&preflightAPK, "apk", "", "path to a built .apk — adds the merged-manifest and native code checks")
+	preflightCmd.Flags().StringVar(&preflightAAB, "aab", "", "path to a built .aab — adds the merged-manifest and native code checks")
 	preflightCmd.Flags().StringVar(&preflightFormat, "format", "terminal", "output format: terminal, json, sarif")
 	preflightCmd.Flags().StringVar(&preflightOutput, "output", "", "write report to file (stdout if omitted)")
 	preflightCmd.Flags().BoolVar(&preflightExitCode, "exit-code", false, "exit non-zero on any CRITICAL or HIGH finding (or, with --verify, a failed flow) — for CI gating")
@@ -97,12 +102,29 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// --apk and --aab both feed the same archive scanner, so only one can be set.
+	if preflightAPK != "" && preflightAAB != "" {
+		return fmt.Errorf("pass --apk or --aab, not both")
+	}
+	androidArtifact := preflightAPK
+	if androidArtifact == "" {
+		androidArtifact = preflightAAB
+	}
+	if androidArtifact != "" {
+		if _, err := os.Stat(androidArtifact); os.IsNotExist(err) {
+			return fmt.Errorf("Android artifact not found: %s", androidArtifact)
+		}
+	}
+
 	// Banner (suppressed for --format json so stdout stays valid JSON).
 	if f := strings.ToLower(preflightFormat); f != "json" && f != "sarif" {
 		purple.Println("\n  greenlight preflight — every check, one command, zero uploads.")
 		fmt.Printf("  Project: %s\n", path)
 		if preflightIPA != "" {
 			fmt.Printf("  IPA:     %s\n", preflightIPA)
+		}
+		if androidArtifact != "" {
+			fmt.Printf("  Android: %s\n", androidArtifact)
 		}
 		// Mirrors the gating in preflight.Run so the banner never advertises a
 		// scanner that will not run.
@@ -111,7 +133,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 		if isIOS || !isAndroid {
 			scanners = append(scanners, "metadata", "codescan", "privacy")
 		}
-		if isAndroid {
+		if isAndroid || androidArtifact != "" {
 			scanners = append(scanners, "playscan")
 		}
 		if preflightIPA != "" {
@@ -122,7 +144,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 
 	// Run all checks
 	start := time.Now()
-	result, err := preflight.Run(path, preflightIPA, verbose)
+	result, err := preflight.Run(path, preflightIPA, androidArtifact, verbose)
 	if err != nil {
 		return fmt.Errorf("preflight failed: %w", err)
 	}
@@ -175,13 +197,16 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	}
 
 	// --verify: the static cycle runs, THEN Revyl runs the flows on a device.
+	//
+	// The platform follows the project rather than being fixed to iOS. An
+	// Android-only project verified as iOS would have its artifact rejected and
+	// its flows run against the wrong store's expectations.
+	verifyPlatform := verifyPlatformFor(path, preflightArtifact)
 	if preflightArtifact != "" {
 		if preflightBuildName == "" {
 			return fmt.Errorf("--artifact requires --build-name (to name or match the Revyl app for the uploaded build)")
 		}
-		// preflight's runtime tier is iOS-only (App Store), matching the
-		// hardcoded Platform: "ios" passed to verify.Run below.
-		if err := verify.ValidateArtifact(preflightArtifact, "ios"); err != nil {
+		if err := verify.ValidateArtifact(preflightArtifact, verifyPlatform); err != nil {
 			return err
 		}
 	}
@@ -189,7 +214,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	vres, verr := verify.Run(verify.Config{
 		ProjectPath: path,
 		BuildName:   preflightBuildName,
-		Platform:    "ios",
+		Platform:    verifyPlatform,
 		Vars:        parseVars(preflightVarsRaw),
 		DeviceModel: preflightDeviceModel,
 		OSVersion:   preflightOSVersion,
@@ -537,4 +562,23 @@ func writeCombinedJSON(w *os.File, result *preflight.Result, vres *verify.Result
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(combined)
+}
+
+// verifyPlatformFor picks the platform the runtime tier should target. An
+// explicit artifact extension is authoritative, since the file itself says what
+// it is; otherwise the project layout decides, defaulting to iOS for a
+// cross-platform or unrecognised project because the App Store flows are the
+// ones greenlight models most completely.
+func verifyPlatformFor(projectPath, artifact string) string {
+	switch strings.ToLower(filepath.Ext(artifact)) {
+	case ".apk":
+		return "android"
+	case ".app":
+		return "ios"
+	}
+	isIOS, isAndroid := preflight.DetectPlatforms(projectPath)
+	if isAndroid && !isIOS {
+		return "android"
+	}
+	return "ios"
 }

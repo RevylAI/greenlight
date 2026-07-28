@@ -591,8 +591,17 @@ func TestScanArchiveAABEndToEnd(t *testing.T) {
 	if findByPolicy(res.Findings, "Package visibility") == nil {
 		t.Error("QUERY_ALL_PACKAGES from the bundle manifest was not flagged")
 	}
-	if findByPolicy(res.Findings, "Scan coverage") != nil {
-		t.Error("a valid protobuf manifest should decode cleanly")
+	// A valid protobuf manifest should decode cleanly, so the decode-failure
+	// coverage finding must be absent. The dependency-coverage finding shares the
+	// "Scan coverage" policy and is expected on every artifact scan, so assert on
+	// the specific title rather than the category.
+	for _, f := range res.Findings {
+		if strings.Contains(f.Title, "Could not decode") {
+			t.Errorf("a valid protobuf manifest should decode cleanly, got: %s", f.Title)
+		}
+	}
+	if findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact") == nil {
+		t.Error("an artifact scan should report the Gradle-only checks it could not run")
 	}
 	if f := findByPolicy(res.Findings, "16 KB page size"); f != nil {
 		t.Errorf("aligned bundle library reported: %s", f.Title)
@@ -736,6 +745,7 @@ func TestFrameworkAttrIDsMatchAapt2(t *testing.T) {
 		0x0101000f: "debuggable",
 		0x01010010: "exported",
 		0x0101020c: "minSdkVersion",
+		0x0101028e: "required",
 		0x01010270: "targetSdkVersion",
 		0x01010280: "allowBackup",
 		0x010104ec: "usesCleartextTraffic",
@@ -770,4 +780,311 @@ func TestAttrNameFallsBackToResourceMap(t *testing.T) {
 	if got := attrName([]string{"exported"}, []uint32{0x01010599}, 0); got != "exported" {
 		t.Errorf("string pool name should take precedence, got %q", got)
 	}
+}
+
+// --- review regressions: native code coverage ---------------------------
+
+// buildTestAAB writes a bundle with the given zip entries plus a decodable
+// protobuf manifest at base/manifest/AndroidManifest.xml.
+func buildTestAAB(t *testing.T, entries map[string][]byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.aab")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+	mw, err := zw.Create("base/manifest/AndroidManifest.xml")
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	manifest := pbElement("manifest",
+		[][]byte{pbAttr("package", "com.example.bundle")},
+		[][]byte{
+			pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", "36")}, nil),
+			pbElement("application", nil, nil),
+		},
+	)
+	if _, err := mw.Write(manifest); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for name, data := range entries {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create %s: %v", name, err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return path
+}
+
+// An AAB can carry native code in any module, not just base. Scanning only
+// base/lib/ let a misaligned feature-module library pass.
+func TestScanArchiveScansFeatureModuleLibs(t *testing.T) {
+	aab := buildTestAAB(t, map[string][]byte{
+		"base/lib/arm64-v8a/libbase.so":      buildTestELF(16384, true),
+		"payments/lib/arm64-v8a/libpay.so":   buildTestELF(4096, true),
+		"onboarding/lib/arm64-v8a/libonb.so": buildTestELF(16384, true),
+	})
+
+	res, err := ScanArchive(aab)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	if res.NativeLibCount != 3 {
+		t.Errorf("NativeLibCount = %d, want 3 (base + two feature modules)", res.NativeLibCount)
+	}
+	f := findByPolicy(res.Findings, "16 KB page size")
+	if f == nil {
+		t.Fatal("a misaligned feature-module library was not flagged")
+	}
+	if !strings.Contains(f.Detail, "libpay.so") {
+		t.Errorf("finding does not name the offending library: %s", f.Detail)
+	}
+}
+
+// Play requires a 64-bit library for every 32-bit ABI shipped.
+func TestScanArchive64BitParity(t *testing.T) {
+	t.Run("32-bit only is flagged", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/armeabi-v7a/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		f := findByPolicy(res.Findings, "64-bit requirement")
+		if f == nil {
+			t.Fatal("armeabi-v7a without arm64-v8a was not flagged")
+		}
+		if f.Severity != sevCritical {
+			t.Errorf("severity = %v, want CRITICAL", f.Severity)
+		}
+	})
+
+	t.Run("both ABIs present is clean", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/armeabi-v7a/libnative.so": buildTestELF(16384, true),
+			"lib/arm64-v8a/libnative.so":   buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
+			t.Errorf("a 32/64 pair should not be flagged: %s", f.Title)
+		}
+	})
+
+	t.Run("64-bit only is clean", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/arm64-v8a/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
+			t.Errorf("a 64-bit-only app should not be flagged: %s", f.Title)
+		}
+	})
+
+	t.Run("x86 without x86_64 is flagged", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/x86/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if findByPolicy(res.Findings, "64-bit requirement") == nil {
+			t.Error("x86 without x86_64 was not flagged")
+		}
+	})
+}
+
+// An artifact scan cannot read the Gradle model, so it must say which checks it
+// skipped rather than presenting a partial scan as a complete one.
+func TestScanArchiveReportsGradleOnlyCoverageGap(t *testing.T) {
+	apk := buildTestAPK(t, map[string][]byte{
+		"lib/arm64-v8a/libnative.so": buildTestELF(16384, true),
+	})
+	res, err := ScanArchive(apk)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	f := findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact")
+	if f == nil {
+		t.Fatal("artifact scan did not report its coverage gap")
+	}
+	for _, want := range []string{"Play Billing", "ads-SDK", "auth-SDK"} {
+		if !strings.Contains(f.Detail, want) {
+			t.Errorf("coverage finding does not mention %q: %s", want, f.Detail)
+		}
+	}
+}
+
+// --- code review regressions --------------------------------------------
+
+// buildTestAABWithFeature writes a bundle whose protobuf manifest declares a
+// uses-feature and a targetSdk, which is what a real Wear or TV bundle looks
+// like after the merge.
+func buildTestAABWithFeature(t *testing.T, feature, required string, targetSDK string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.aab")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer f.Close()
+
+	featureAttrs := [][]byte{pbAttr("name", feature)}
+	if required != "" {
+		featureAttrs = append(featureAttrs, pbAttr("required", required))
+	}
+
+	zw := zip.NewWriter(f)
+	mw, err := zw.Create("base/manifest/AndroidManifest.xml")
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	manifest := pbElement("manifest",
+		[][]byte{pbAttr("package", "com.example.bundle")},
+		[][]byte{
+			pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", targetSDK)}, nil),
+			pbElement("uses-feature", featureAttrs, nil),
+			pbElement("application", nil, nil),
+		},
+	)
+	if _, err := mw.Write(manifest); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return path
+}
+
+// The form-factor rule was inert on the archive path: applyElement had no
+// uses-feature case, so a compiled manifest never populated UsesFeatures and a
+// Wear bundle still got the phone schedule's CRITICAL.
+func TestScanArchiveDecodesUsesFeatureForFormFactor(t *testing.T) {
+	aab := buildTestAABWithFeature(t, "android.hardware.type.watch", "", "33")
+	res, err := ScanArchive(aab)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	f := findByPolicy(res.Findings, "Target API level")
+	if f == nil {
+		t.Fatal("no target API finding")
+	}
+	if f.Severity != sevWarn {
+		t.Errorf("severity = %v, want WARN — a Wear bundle must not be gated on the phone schedule (got %q)", f.Severity, f.Title)
+	}
+	if !strings.Contains(f.Title, string(FormFactorWear)) {
+		t.Errorf("finding does not name the form factor: %s", f.Title)
+	}
+}
+
+// A phone app that also ships to TV declares leanback with required="false".
+// Treating that as a TV app would downgrade a genuine phone CRITICAL.
+func TestScanArchiveIgnoresUnrequiredFormFactorFeature(t *testing.T) {
+	aab := buildTestAABWithFeature(t, "android.software.leanback", "false", "33")
+	res, err := ScanArchive(aab)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	f := findByPolicy(res.Findings, "Target API level")
+	if f == nil {
+		t.Fatal("no target API finding")
+	}
+	if f.Severity != sevCritical {
+		t.Errorf("severity = %v, want CRITICAL — leanback required=false is a phone app, not a TV app", f.Severity)
+	}
+}
+
+// The Gradle coverage gap exists whether or not the manifest decoded.
+func TestScanArchiveReportsCoverageGapWhenManifestUndecodable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.aab")
+	f, _ := os.Create(path)
+	zw := zip.NewWriter(f)
+	w, _ := zw.Create("base/manifest/AndroidManifest.xml")
+	w.Write([]byte{0x00})
+	zw.Close()
+	f.Close()
+
+	res, err := ScanArchive(path)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	if findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact") == nil {
+		t.Error("the Gradle-only gap must be reported even when the manifest cannot be decoded")
+	}
+}
+
+// The APK path decodes uses-feature from binary XML, where android:required is
+// a typed boolean rather than the literal string "false". Both compiled forms
+// must reach the form-factor logic identically.
+func TestBinaryXMLDecodesUsesFeatureRequired(t *testing.T) {
+	build := func(requiredData uint32, withRequired bool) *Manifest {
+		t.Helper()
+		b := &axmlBuilder{}
+		nameAttr := b.attrRef(0x01010003)
+		requiredAttr := b.attrRef(0x0101028e) // android:required
+		pkgIdx := b.str("com.example.tv")
+		featIdx := b.str("android.software.leanback")
+		packageAttr := b.str("package")
+
+		b.startTag("manifest", []buildAttr{
+			{nameIdx: packageAttr, dataType: typeString, data: pkgIdx, rawIdx: pkgIdx},
+		})
+		attrs := []buildAttr{
+			{nameIdx: nameAttr, dataType: typeString, data: featIdx, rawIdx: featIdx},
+		}
+		if withRequired {
+			attrs = append(attrs, buildAttr{
+				nameIdx: requiredAttr, dataType: typeIntBoolean, data: requiredData, rawIdx: 0xFFFFFFFF,
+			})
+		}
+		b.startTag("uses-feature", attrs)
+		b.endTag("uses-feature")
+		b.startTag("application", nil)
+		b.endTag("application")
+		b.endTag("manifest")
+
+		m, err := DecodeBinaryXML(b.build())
+		if err != nil {
+			t.Fatalf("DecodeBinaryXML: %v", err)
+		}
+		return m
+	}
+
+	t.Run("required=false is not a TV app", func(t *testing.T) {
+		m := build(0, true)
+		if len(m.UsesFeatures) != 1 {
+			t.Fatalf("UsesFeatures = %d, want 1 (binary XML must decode uses-feature)", len(m.UsesFeatures))
+		}
+		if got := m.FormFactor(); got != FormFactorPhone {
+			t.Errorf("FormFactor = %q, want phone — leanback required=false is a phone app", got)
+		}
+	})
+
+	t.Run("required=true is a TV app", func(t *testing.T) {
+		if got := build(0xFFFFFFFF, true).FormFactor(); got != FormFactorTV {
+			t.Errorf("FormFactor = %q, want %q", got, FormFactorTV)
+		}
+	})
+
+	t.Run("absent required defaults to true", func(t *testing.T) {
+		if got := build(0, false).FormFactor(); got != FormFactorTV {
+			t.Errorf("FormFactor = %q, want %q — required defaults to true when absent", got, FormFactorTV)
+		}
+	})
 }

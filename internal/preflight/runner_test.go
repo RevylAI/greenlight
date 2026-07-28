@@ -56,7 +56,7 @@ func TestRunDetectsAndroidProject(t *testing.T) {
     <application />
 </manifest>`)
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRunLeavesIOSProjectsUnchanged(t *testing.T) {
 	mustWrite(t, root, "app.json", `{"expo":{"name":"Demo","description":"d","version":"1.0.0","icon":"./icon.png","ios":{"bundleIdentifier":"com.example.demo"}}}`)
 	mustWrite(t, root, "App.swift", "import SwiftUI\n")
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAndroidOnlyProjectGetsNoAppleFindings(t *testing.T) {
 </manifest>`)
 	mustWrite(t, root, "app/src/main/java/com/example/app/MainActivity.kt", "package com.example.app\n")
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCrossPlatformProjectRunsBothScanners(t *testing.T) {
 		t.Fatalf("DetectPlatforms = (ios=%v, android=%v), want both", ios, android)
 	}
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -223,5 +223,48 @@ func TestDetectIOSSkipsVendoredDirectories(t *testing.T) {
 
 	if ios, _ := DetectPlatforms(root); ios {
 		t.Error("vendored iOS sources should not classify the repo as iOS")
+	}
+}
+
+// A failing archive scan must not discard the source-scan findings that already
+// succeeded: the run is marked incomplete, but what did scan is still reported.
+func TestArchiveFailureKeepsSourceFindings(t *testing.T) {
+	root := t.TempDir()
+	mustWrite := func(rel, body string) {
+		t.Helper()
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// An Android project with a debuggable manifest, which playscan flags.
+	mustWrite("app/src/main/AndroidManifest.xml",
+		`<manifest package="com.example"><application android:debuggable="true"/></manifest>`)
+	mustWrite("app/build.gradle", "android { defaultConfig { targetSdk 36 } }")
+
+	// A file that is not a valid archive, so ScanArchive errors.
+	broken := filepath.Join(root, "broken.apk")
+	if err := os.WriteFile(broken, []byte("not a zip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Run(root, "", broken, false)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !result.Incomplete {
+		t.Error("a failed archive scan must mark the run incomplete")
+	}
+	var playFindings int
+	for _, f := range result.Findings {
+		if f.Source == "playscan" {
+			playFindings++
+		}
+	}
+	if playFindings == 0 {
+		t.Error("source playscan findings were discarded when the archive scan failed")
 	}
 }

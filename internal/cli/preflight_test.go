@@ -2,6 +2,8 @@ package cli
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/RevylAI/greenlight/internal/preflight"
@@ -48,5 +50,42 @@ func TestPreflightExit(t *testing.T) {
 	}
 	if err := preflightExit(clean, &verify.Result{Summary: verify.Summary{Passed: true}}); err != nil {
 		t.Errorf("clean static + passed runtime should not trip, got %v", err)
+	}
+}
+
+// --- review regression: runtime tier platform ---------------------------
+
+// preflight --verify used to hardcode Platform: "ios", so an Android-only
+// project had its flows run against the wrong store and its .apk rejected.
+func TestVerifyPlatformFollowsProject(t *testing.T) {
+	androidOnly := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(androidOnly, "app", "src", "main"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(androidOnly, "app", "src", "main", "AndroidManifest.xml"),
+		[]byte(`<manifest package="com.example"><application/></manifest>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(androidOnly, "app", "build.gradle"),
+		[]byte("android { defaultConfig { targetSdk 36 } }"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := verifyPlatformFor(androidOnly, ""); got != "android" {
+		t.Errorf("android-only project: platform = %q, want android", got)
+	}
+
+	// An explicit artifact extension wins over project detection: the file
+	// itself is unambiguous about what it is.
+	if got := verifyPlatformFor(androidOnly, "build/MyApp.app"); got != "ios" {
+		t.Errorf("explicit .app: platform = %q, want ios", got)
+	}
+	if got := verifyPlatformFor(t.TempDir(), "build/app-release.apk"); got != "android" {
+		t.Errorf("explicit .apk: platform = %q, want android", got)
+	}
+
+	// An empty or iOS project keeps the previous default.
+	if got := verifyPlatformFor(t.TempDir(), ""); got != "ios" {
+		t.Errorf("unrecognised project: platform = %q, want ios", got)
 	}
 }
