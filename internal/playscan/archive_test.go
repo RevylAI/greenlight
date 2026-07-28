@@ -745,6 +745,7 @@ func TestFrameworkAttrIDsMatchAapt2(t *testing.T) {
 		0x0101000f: "debuggable",
 		0x01010010: "exported",
 		0x0101020c: "minSdkVersion",
+		0x0101028e: "required",
 		0x01010270: "targetSdkVersion",
 		0x01010280: "allowBackup",
 		0x010104ec: "usesCleartextTraffic",
@@ -1026,4 +1027,64 @@ func TestScanArchiveReportsCoverageGapWhenManifestUndecodable(t *testing.T) {
 	if findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact") == nil {
 		t.Error("the Gradle-only gap must be reported even when the manifest cannot be decoded")
 	}
+}
+
+// The APK path decodes uses-feature from binary XML, where android:required is
+// a typed boolean rather than the literal string "false". Both compiled forms
+// must reach the form-factor logic identically.
+func TestBinaryXMLDecodesUsesFeatureRequired(t *testing.T) {
+	build := func(requiredData uint32, withRequired bool) *Manifest {
+		t.Helper()
+		b := &axmlBuilder{}
+		nameAttr := b.attrRef(0x01010003)
+		requiredAttr := b.attrRef(0x0101028e) // android:required
+		pkgIdx := b.str("com.example.tv")
+		featIdx := b.str("android.software.leanback")
+		packageAttr := b.str("package")
+
+		b.startTag("manifest", []buildAttr{
+			{nameIdx: packageAttr, dataType: typeString, data: pkgIdx, rawIdx: pkgIdx},
+		})
+		attrs := []buildAttr{
+			{nameIdx: nameAttr, dataType: typeString, data: featIdx, rawIdx: featIdx},
+		}
+		if withRequired {
+			attrs = append(attrs, buildAttr{
+				nameIdx: requiredAttr, dataType: typeIntBoolean, data: requiredData, rawIdx: 0xFFFFFFFF,
+			})
+		}
+		b.startTag("uses-feature", attrs)
+		b.endTag("uses-feature")
+		b.startTag("application", nil)
+		b.endTag("application")
+		b.endTag("manifest")
+
+		m, err := DecodeBinaryXML(b.build())
+		if err != nil {
+			t.Fatalf("DecodeBinaryXML: %v", err)
+		}
+		return m
+	}
+
+	t.Run("required=false is not a TV app", func(t *testing.T) {
+		m := build(0, true)
+		if len(m.UsesFeatures) != 1 {
+			t.Fatalf("UsesFeatures = %d, want 1 (binary XML must decode uses-feature)", len(m.UsesFeatures))
+		}
+		if got := m.FormFactor(); got != FormFactorPhone {
+			t.Errorf("FormFactor = %q, want phone — leanback required=false is a phone app", got)
+		}
+	})
+
+	t.Run("required=true is a TV app", func(t *testing.T) {
+		if got := build(0xFFFFFFFF, true).FormFactor(); got != FormFactorTV {
+			t.Errorf("FormFactor = %q, want %q", got, FormFactorTV)
+		}
+	})
+
+	t.Run("absent required defaults to true", func(t *testing.T) {
+		if got := build(0, false).FormFactor(); got != FormFactorTV {
+			t.Errorf("FormFactor = %q, want %q — required defaults to true when absent", got, FormFactorTV)
+		}
+	})
 }

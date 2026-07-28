@@ -272,6 +272,7 @@ var frameworkAttrIDs = map[uint32]string{
 	0x0101000f: "debuggable",
 	0x01010010: "exported",
 	0x0101020c: "minSdkVersion",
+	0x0101028e: "required",
 	0x01010270: "targetSdkVersion",
 	0x01010280: "allowBackup",
 	0x010104ec: "usesCleartextTraffic",
