@@ -353,7 +353,7 @@ Or copy the skill file into a project by hand:
 
 ```bash
 mkdir -p .claude/skills
-cp /path/to/greenlight/SKILL.md .claude/skills/greenlight.md
+cp /path/to/greenlight/skills/greenlight/SKILL.md .claude/skills/greenlight.md
 ```
 
 Then: *"Run greenlight preflight and fix everything until it passes."* Claude works down the severity ladder, CRITICAL first, then HIGH, WARN, and INFO, re-running after each pass.
