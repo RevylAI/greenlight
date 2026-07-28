@@ -3,12 +3,12 @@
   "owner": {
     "name": "revylai"
   },
-  "description": "Greenlight — Apple App Store pre-submission compliance scanner.",
+  "description": "Greenlight \u2014 Apple App Store and Google Play pre-submission compliance scanner.",
   "plugins": [
     {
       "name": "greenlight",
       "source": "./",
-      "description": "Run ALL App Store compliance checks in one command — code patterns, privacy manifests, IPA binaries, metadata. Catches rejections before you submit.",
+      "description": "Run every App Store and Google Play compliance check in one command: code patterns, privacy manifests, Android manifests and Gradle, IPA/APK/AAB binaries, metadata. Catches rejections before you submit.",
       "category": "compliance",
       "tags": [
         "apple",
@@ -20,7 +20,12 @@
         "react-native",
         "expo",
         "rejection",
-        "compliance"
+        "compliance",
+        "android",
+        "google-play",
+        "play-policy",
+        "gradle",
+        "aab"
       ],
       "strict": true
     }

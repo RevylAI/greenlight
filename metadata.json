@@ -1,7 +1,7 @@
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "name": "greenlight",
-  "description": "Pre-submission compliance scanner for Apple App Store",
+  "description": "Pre-submission compliance scanner for the Apple App Store and Google Play",
   "organization": {
     "name": "Revyl",
     "url": "https://revyl.com"
@@ -13,10 +13,27 @@
     "https://developer.apple.com/documentation/apptrackingtransparency",
     "https://developer.apple.com/documentation/localauthentication",
     "https://developer.apple.com/documentation/networkextension/nevpnmanager",
-    "https://developer.apple.com/help/app-store-connect/"
+    "https://developer.apple.com/help/app-store-connect/",
+    "https://support.google.com/googleplay/android-developer/answer/16810878",
+    "https://developer.android.com/google/play/requirements/target-sdk"
   ],
   "keywords": [
-    "apple", "app-store", "review", "guidelines", "ios", "swift",
-    "react-native", "expo", "compliance", "rejection", "preflight"
+    "apple",
+    "app-store",
+    "review",
+    "guidelines",
+    "ios",
+    "swift",
+    "react-native",
+    "expo",
+    "compliance",
+    "rejection",
+    "preflight",
+    "android",
+    "google-play",
+    "playscan",
+    "gradle",
+    "aab",
+    "apk"
   ]
 }
