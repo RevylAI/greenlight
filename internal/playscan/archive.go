@@ -106,13 +106,23 @@ func ScanArchive(archivePath string) (*ScanResult, error) {
 		for _, rule := range allRules() {
 			result.Findings = append(result.Findings, rule(ctx)...)
 		}
-		result.Findings = append(result.Findings, gradleOnlyCoverageFinding(archivePath))
 	}
+
+	// The Gradle-only gap exists whether or not the manifest decoded, so this
+	// sits outside the block above.
+	result.Findings = append(result.Findings, gradleOnlyCoverageFinding(archivePath))
 
 	libs := collectNativeLibs(&zr.Reader, kind)
 	result.NativeLibCount = len(libs)
 	result.Findings = append(result.Findings, checkPageAlignment(libs, kind)...)
-	result.Findings = append(result.Findings, check64BitParity(libs)...)
+
+	// ABI parity is a property of the whole app. A config split legitimately
+	// carries one ABI, so running the rule against it would report a violation
+	// that does not exist in the release it belongs to.
+	isSplit := manifest != nil && strings.TrimSpace(manifest.Split) != ""
+	if !isSplit {
+		result.Findings = append(result.Findings, check64BitParity(libs)...)
+	}
 
 	return result, nil
 }

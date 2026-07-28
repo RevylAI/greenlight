@@ -113,8 +113,12 @@ func ruleTargetAPILevel(c *ruleContext) []Finding {
 	// Play publishes a separate target API schedule per form factor. Holding a
 	// Wear, TV, Automotive, or XR app to the phone schedule produces a blocking
 	// finding Play would not produce, so report it without gating the build.
-	if ff := c.formFactor(); ff != FormFactorPhone {
-		if c.targetSDK == 0 || c.targetSDK >= requiredTargetSDKNew {
+	//
+	// An unresolved targetSdk falls through to the shared "could not determine"
+	// finding below, because not knowing the value is worth reporting on every
+	// track.
+	if ff := c.formFactor(); ff != FormFactorPhone && c.targetSDK != 0 {
+		if c.targetSDK >= requiredTargetSDKNew {
 			return nil
 		}
 		return []Finding{{

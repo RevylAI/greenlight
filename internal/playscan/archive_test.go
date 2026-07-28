@@ -801,7 +801,10 @@ func buildTestAAB(t *testing.T, entries map[string][]byte) string {
 	}
 	manifest := pbElement("manifest",
 		[][]byte{pbAttr("package", "com.example.bundle")},
-		[][]byte{pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", "36")}, nil)},
+		[][]byte{
+			pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", "36")}, nil),
+			pbElement("application", nil, nil),
+		},
 	)
 	if _, err := mw.Write(manifest); err != nil {
 		t.Fatalf("write manifest: %v", err)
@@ -924,5 +927,103 @@ func TestScanArchiveReportsGradleOnlyCoverageGap(t *testing.T) {
 		if !strings.Contains(f.Detail, want) {
 			t.Errorf("coverage finding does not mention %q: %s", want, f.Detail)
 		}
+	}
+}
+
+// --- code review regressions --------------------------------------------
+
+// buildTestAABWithFeature writes a bundle whose protobuf manifest declares a
+// uses-feature and a targetSdk, which is what a real Wear or TV bundle looks
+// like after the merge.
+func buildTestAABWithFeature(t *testing.T, feature, required string, targetSDK string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.aab")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer f.Close()
+
+	featureAttrs := [][]byte{pbAttr("name", feature)}
+	if required != "" {
+		featureAttrs = append(featureAttrs, pbAttr("required", required))
+	}
+
+	zw := zip.NewWriter(f)
+	mw, err := zw.Create("base/manifest/AndroidManifest.xml")
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	manifest := pbElement("manifest",
+		[][]byte{pbAttr("package", "com.example.bundle")},
+		[][]byte{
+			pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", targetSDK)}, nil),
+			pbElement("uses-feature", featureAttrs, nil),
+			pbElement("application", nil, nil),
+		},
+	)
+	if _, err := mw.Write(manifest); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return path
+}
+
+// The form-factor rule was inert on the archive path: applyElement had no
+// uses-feature case, so a compiled manifest never populated UsesFeatures and a
+// Wear bundle still got the phone schedule's CRITICAL.
+func TestScanArchiveDecodesUsesFeatureForFormFactor(t *testing.T) {
+	aab := buildTestAABWithFeature(t, "android.hardware.type.watch", "", "33")
+	res, err := ScanArchive(aab)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	f := findByPolicy(res.Findings, "Target API level")
+	if f == nil {
+		t.Fatal("no target API finding")
+	}
+	if f.Severity != sevWarn {
+		t.Errorf("severity = %v, want WARN — a Wear bundle must not be gated on the phone schedule (got %q)", f.Severity, f.Title)
+	}
+	if !strings.Contains(f.Title, string(FormFactorWear)) {
+		t.Errorf("finding does not name the form factor: %s", f.Title)
+	}
+}
+
+// A phone app that also ships to TV declares leanback with required="false".
+// Treating that as a TV app would downgrade a genuine phone CRITICAL.
+func TestScanArchiveIgnoresUnrequiredFormFactorFeature(t *testing.T) {
+	aab := buildTestAABWithFeature(t, "android.software.leanback", "false", "33")
+	res, err := ScanArchive(aab)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	f := findByPolicy(res.Findings, "Target API level")
+	if f == nil {
+		t.Fatal("no target API finding")
+	}
+	if f.Severity != sevCritical {
+		t.Errorf("severity = %v, want CRITICAL — leanback required=false is a phone app, not a TV app", f.Severity)
+	}
+}
+
+// The Gradle coverage gap exists whether or not the manifest decoded.
+func TestScanArchiveReportsCoverageGapWhenManifestUndecodable(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "app.aab")
+	f, _ := os.Create(path)
+	zw := zip.NewWriter(f)
+	w, _ := zw.Create("base/manifest/AndroidManifest.xml")
+	w.Write([]byte{0x00})
+	zw.Close()
+	f.Close()
+
+	res, err := ScanArchive(path)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	if findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact") == nil {
+		t.Error("the Gradle-only gap must be reported even when the manifest cannot be decoded")
 	}
 }

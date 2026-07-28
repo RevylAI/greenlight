@@ -122,11 +122,21 @@ func applyElement(m *Manifest, name string, attrs []axmlAttr, path []string, cur
 	switch name {
 	case "manifest":
 		m.Package = get("package")
+		m.Split = get("split")
 
 	case "uses-permission":
 		m.Permissions = append(m.Permissions, UsesPermission{Name: get("name")})
 	case "uses-permission-sdk-23":
 		m.PermissionsSDK23 = append(m.PermissionsSDK23, UsesPermission{Name: get("name")})
+
+	case "uses-feature":
+		// The merged manifest is where a form factor declaration is
+		// authoritative, so this has to be decoded on the archive path too, not
+		// only by the source scan's encoding/xml pass.
+		m.UsesFeatures = append(m.UsesFeatures, UsesFeature{
+			Name:     get("name"),
+			Required: get("required"),
+		})
 
 	case "uses-sdk":
 		m.UsesSDK = &UsesSDK{

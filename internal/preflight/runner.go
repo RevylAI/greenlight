@@ -193,22 +193,27 @@ func Run(projectPath string, ipaPath string, androidArtifact string, verbose boo
 
 			// Source and archive are complementary, so when both are available
 			// both run and their findings are merged.
+			//
+			// A failure in one does not discard the other: the error is recorded
+			// (which marks the run incomplete) and whatever did scan is still
+			// merged, so a broken --apk cannot silently erase the source
+			// findings that already succeeded.
 			var results []*playscan.ScanResult
 			if isAndroid {
 				playResult, err := playscan.Scan(projectPath)
 				if err != nil {
 					errs <- err
-					return
+				} else {
+					results = append(results, playResult)
 				}
-				results = append(results, playResult)
 			}
 			if androidArtifact != "" {
 				archiveResult, err := playscan.ScanArchive(androidArtifact)
 				if err != nil {
 					errs <- err
-					return
+				} else {
+					results = append(results, archiveResult)
 				}
-				results = append(results, archiveResult)
 			}
 
 			mu.Lock()
