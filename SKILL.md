@@ -1,11 +1,13 @@
 ---
 name: greenlight
 description: >
-  Pre-submission compliance scanner for Apple App Store. Use this skill when reviewing
-  iOS, macOS, tvOS, watchOS, or visionOS app code (Swift, Objective-C, React Native, Expo)
-  to identify potential App Store rejection risks before submission. Triggers on tasks involving
-  app review preparation, compliance checking, App Store submission readiness, or when a user
-  asks about App Store guidelines.
+  Pre-submission compliance scanner for the Apple App Store and Google Play. Use this skill
+  when reviewing iOS, macOS, tvOS, watchOS, visionOS, or Android app code (Swift, Objective-C,
+  Kotlin, Java, React Native, Expo) to identify store rejection risks before submission, including
+  Android manifest and Gradle policy checks and built APK/AAB inspection. Triggers on tasks
+  involving app review preparation, compliance checking, App Store or Play submission readiness,
+  target API level deadlines, restricted permissions, or when a user asks about App Store
+  guidelines or Google Play Developer Program Policies.
 ---
 
 # Greenlight — App Store Pre-Submission Scanner
