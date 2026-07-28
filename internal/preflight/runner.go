@@ -33,11 +33,12 @@ type Finding struct {
 
 // Result holds the combined output from all scanners.
 type Result struct {
-	ProjectPath string        `json:"project_path"`
-	IPAPath     string        `json:"ipa_path,omitempty"`
-	Findings    []Finding     `json:"findings"`
-	Summary     Summary       `json:"summary"`
-	Elapsed     time.Duration `json:"elapsed"`
+	ProjectPath     string        `json:"project_path"`
+	IPAPath         string        `json:"ipa_path,omitempty"`
+	AndroidArtifact string        `json:"android_artifact,omitempty"`
+	Findings        []Finding     `json:"findings"`
+	Summary         Summary       `json:"summary"`
+	Elapsed         time.Duration `json:"elapsed"`
 
 	// Incomplete is true when a requested sub-scanner failed to run, so the
 	// results may be partial. CI gating (--exit-code) treats this as a failure.
@@ -66,11 +67,15 @@ type Summary struct {
 	Passed   bool `json:"passed"` // true if zero CRITICALs
 }
 
-// Run executes all scanners and returns a unified result.
-func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
+// Run executes every applicable scanner. androidArtifact is an optional .apk or
+// .aab: when set, the archive is scanned in addition to the source tree, because
+// the two see different things (source resolves the Gradle model, the archive
+// carries the merged manifest and the native libraries).
+func Run(projectPath string, ipaPath string, androidArtifact string, verbose bool) (*Result, error) {
 	result := &Result{
-		ProjectPath: projectPath,
-		IPAPath:     ipaPath,
+		ProjectPath:     projectPath,
+		IPAPath:         ipaPath,
+		AndroidArtifact: androidArtifact,
 	}
 
 	// Optional .greenlight.yml (rule overrides / ignores) for the code scan.
@@ -181,30 +186,52 @@ func Run(projectPath string, ipaPath string, verbose bool) (*Result, error) {
 	//
 	// A cross-platform repo satisfies both this and runApple, so it is checked
 	// against both stores in a single pass.
-	if isAndroid {
+	if isAndroid || androidArtifact != "" {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			playResult, err := playscan.Scan(projectPath)
-			if err != nil {
-				errs <- err
-				return
+
+			// Source and archive are complementary, so when both are available
+			// both run and their findings are merged.
+			var results []*playscan.ScanResult
+			if isAndroid {
+				playResult, err := playscan.Scan(projectPath)
+				if err != nil {
+					errs <- err
+					return
+				}
+				results = append(results, playResult)
 			}
+			if androidArtifact != "" {
+				archiveResult, err := playscan.ScanArchive(androidArtifact)
+				if err != nil {
+					errs <- err
+					return
+				}
+				results = append(results, archiveResult)
+			}
+
 			mu.Lock()
-			result.PackageName = playResult.PackageName
-			result.TargetSDK = playResult.TargetSDK
-			for _, f := range playResult.Findings {
-				result.Findings = append(result.Findings, Finding{
-					Source:    "playscan",
-					Severity:  f.Severity,
-					Guideline: f.Policy,
-					Title:     f.Title,
-					Detail:    f.Detail,
-					Fix:       f.Fix,
-					Doc:       f.Doc,
-					File:      f.File,
-					Line:      f.Line,
-				})
+			for _, playResult := range results {
+				if playResult.PackageName != "" {
+					result.PackageName = playResult.PackageName
+				}
+				if playResult.TargetSDK != 0 {
+					result.TargetSDK = playResult.TargetSDK
+				}
+				for _, f := range playResult.Findings {
+					result.Findings = append(result.Findings, Finding{
+						Source:    "playscan",
+						Severity:  f.Severity,
+						Guideline: f.Policy,
+						Title:     f.Title,
+						Detail:    f.Detail,
+						Fix:       f.Fix,
+						Doc:       f.Doc,
+						File:      f.File,
+						Line:      f.Line,
+					})
+				}
 			}
 			mu.Unlock()
 		}()

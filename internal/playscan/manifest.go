@@ -21,11 +21,55 @@ type Manifest struct {
 	// policy obligations as a plain <uses-permission>.
 	PermissionsSDK23 []UsesPermission `xml:"uses-permission-sdk-23"`
 	UsesSDK          *UsesSDK         `xml:"uses-sdk"`
+	UsesFeatures     []UsesFeature    `xml:"uses-feature"`
 	Application      *Application     `xml:"application"`
 }
 
 type UsesPermission struct {
 	Name string `xml:"name,attr"`
+}
+
+type UsesFeature struct {
+	Name string `xml:"name,attr"`
+}
+
+// FormFactor is the Play distribution channel an app targets. Play sets target
+// API level requirements per form factor, so a Wear or TV app is not held to
+// the phone schedule.
+type FormFactor string
+
+const (
+	FormFactorPhone      FormFactor = "phone"
+	FormFactorWear       FormFactor = "Wear OS"
+	FormFactorTV         FormFactor = "Android TV"
+	FormFactorAutomotive FormFactor = "Android Automotive"
+	FormFactorXR         FormFactor = "Android XR"
+)
+
+// featureFormFactors maps the <uses-feature> declaration that puts an app on a
+// non-phone Play track to that form factor.
+var featureFormFactors = map[string]FormFactor{
+	"android.hardware.type.watch":       FormFactorWear,
+	"android.hardware.type.television":  FormFactorTV,
+	"android.software.leanback":         FormFactorTV,
+	"android.hardware.type.automotive":  FormFactorAutomotive,
+	"android.software.xr.immersive":     FormFactorXR,
+	"android.hardware.xr.head_tracking": FormFactorXR,
+}
+
+// FormFactor reports the non-phone form factor this manifest declares, or
+// FormFactorPhone when it declares none. Phone and tablet share one schedule,
+// so they are not distinguished.
+func (m *Manifest) FormFactor() FormFactor {
+	if m == nil {
+		return FormFactorPhone
+	}
+	for _, f := range m.UsesFeatures {
+		if ff, ok := featureFormFactors[f.Name]; ok {
+			return ff
+		}
+	}
+	return FormFactorPhone
 }
 
 type UsesSDK struct {

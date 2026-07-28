@@ -56,7 +56,7 @@ func TestRunDetectsAndroidProject(t *testing.T) {
     <application />
 </manifest>`)
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestRunLeavesIOSProjectsUnchanged(t *testing.T) {
 	mustWrite(t, root, "app.json", `{"expo":{"name":"Demo","description":"d","version":"1.0.0","icon":"./icon.png","ios":{"bundleIdentifier":"com.example.demo"}}}`)
 	mustWrite(t, root, "App.swift", "import SwiftUI\n")
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestAndroidOnlyProjectGetsNoAppleFindings(t *testing.T) {
 </manifest>`)
 	mustWrite(t, root, "app/src/main/java/com/example/app/MainActivity.kt", "package com.example.app\n")
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCrossPlatformProjectRunsBothScanners(t *testing.T) {
 		t.Fatalf("DetectPlatforms = (ios=%v, android=%v), want both", ios, android)
 	}
 
-	result, err := Run(root, "", false)
+	result, err := Run(root, "", "", false)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

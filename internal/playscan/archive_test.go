@@ -591,8 +591,17 @@ func TestScanArchiveAABEndToEnd(t *testing.T) {
 	if findByPolicy(res.Findings, "Package visibility") == nil {
 		t.Error("QUERY_ALL_PACKAGES from the bundle manifest was not flagged")
 	}
-	if findByPolicy(res.Findings, "Scan coverage") != nil {
-		t.Error("a valid protobuf manifest should decode cleanly")
+	// A valid protobuf manifest should decode cleanly, so the decode-failure
+	// coverage finding must be absent. The dependency-coverage finding shares the
+	// "Scan coverage" policy and is expected on every artifact scan, so assert on
+	// the specific title rather than the category.
+	for _, f := range res.Findings {
+		if strings.Contains(f.Title, "Could not decode") {
+			t.Errorf("a valid protobuf manifest should decode cleanly, got: %s", f.Title)
+		}
+	}
+	if findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact") == nil {
+		t.Error("an artifact scan should report the Gradle-only checks it could not run")
 	}
 	if f := findByPolicy(res.Findings, "16 KB page size"); f != nil {
 		t.Errorf("aligned bundle library reported: %s", f.Title)
@@ -769,5 +778,151 @@ func TestAttrNameFallsBackToResourceMap(t *testing.T) {
 	// A populated pool entry always wins over the map.
 	if got := attrName([]string{"exported"}, []uint32{0x01010599}, 0); got != "exported" {
 		t.Errorf("string pool name should take precedence, got %q", got)
+	}
+}
+
+// --- review regressions: native code coverage ---------------------------
+
+// buildTestAAB writes a bundle with the given zip entries plus a decodable
+// protobuf manifest at base/manifest/AndroidManifest.xml.
+func buildTestAAB(t *testing.T, entries map[string][]byte) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "app.aab")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	defer f.Close()
+
+	zw := zip.NewWriter(f)
+	mw, err := zw.Create("base/manifest/AndroidManifest.xml")
+	if err != nil {
+		t.Fatalf("zip create: %v", err)
+	}
+	manifest := pbElement("manifest",
+		[][]byte{pbAttr("package", "com.example.bundle")},
+		[][]byte{pbElement("uses-sdk", [][]byte{pbAttr("targetSdkVersion", "36")}, nil)},
+	)
+	if _, err := mw.Write(manifest); err != nil {
+		t.Fatalf("write manifest: %v", err)
+	}
+	for name, data := range entries {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("zip create %s: %v", name, err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("zip close: %v", err)
+	}
+	return path
+}
+
+// An AAB can carry native code in any module, not just base. Scanning only
+// base/lib/ let a misaligned feature-module library pass.
+func TestScanArchiveScansFeatureModuleLibs(t *testing.T) {
+	aab := buildTestAAB(t, map[string][]byte{
+		"base/lib/arm64-v8a/libbase.so":      buildTestELF(16384, true),
+		"payments/lib/arm64-v8a/libpay.so":   buildTestELF(4096, true),
+		"onboarding/lib/arm64-v8a/libonb.so": buildTestELF(16384, true),
+	})
+
+	res, err := ScanArchive(aab)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	if res.NativeLibCount != 3 {
+		t.Errorf("NativeLibCount = %d, want 3 (base + two feature modules)", res.NativeLibCount)
+	}
+	f := findByPolicy(res.Findings, "16 KB page size")
+	if f == nil {
+		t.Fatal("a misaligned feature-module library was not flagged")
+	}
+	if !strings.Contains(f.Detail, "libpay.so") {
+		t.Errorf("finding does not name the offending library: %s", f.Detail)
+	}
+}
+
+// Play requires a 64-bit library for every 32-bit ABI shipped.
+func TestScanArchive64BitParity(t *testing.T) {
+	t.Run("32-bit only is flagged", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/armeabi-v7a/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		f := findByPolicy(res.Findings, "64-bit requirement")
+		if f == nil {
+			t.Fatal("armeabi-v7a without arm64-v8a was not flagged")
+		}
+		if f.Severity != sevCritical {
+			t.Errorf("severity = %v, want CRITICAL", f.Severity)
+		}
+	})
+
+	t.Run("both ABIs present is clean", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/armeabi-v7a/libnative.so": buildTestELF(16384, true),
+			"lib/arm64-v8a/libnative.so":   buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
+			t.Errorf("a 32/64 pair should not be flagged: %s", f.Title)
+		}
+	})
+
+	t.Run("64-bit only is clean", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/arm64-v8a/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if f := findByPolicy(res.Findings, "64-bit requirement"); f != nil {
+			t.Errorf("a 64-bit-only app should not be flagged: %s", f.Title)
+		}
+	})
+
+	t.Run("x86 without x86_64 is flagged", func(t *testing.T) {
+		apk := buildTestAPK(t, map[string][]byte{
+			"lib/x86/libnative.so": buildTestELF(16384, true),
+		})
+		res, err := ScanArchive(apk)
+		if err != nil {
+			t.Fatalf("ScanArchive: %v", err)
+		}
+		if findByPolicy(res.Findings, "64-bit requirement") == nil {
+			t.Error("x86 without x86_64 was not flagged")
+		}
+	})
+}
+
+// An artifact scan cannot read the Gradle model, so it must say which checks it
+// skipped rather than presenting a partial scan as a complete one.
+func TestScanArchiveReportsGradleOnlyCoverageGap(t *testing.T) {
+	apk := buildTestAPK(t, map[string][]byte{
+		"lib/arm64-v8a/libnative.so": buildTestELF(16384, true),
+	})
+	res, err := ScanArchive(apk)
+	if err != nil {
+		t.Fatalf("ScanArchive: %v", err)
+	}
+	f := findByTitle(res.Findings, "Dependency-based checks were skipped for this artifact")
+	if f == nil {
+		t.Fatal("artifact scan did not report its coverage gap")
+	}
+	for _, want := range []string{"Play Billing", "ads-SDK", "auth-SDK"} {
+		if !strings.Contains(f.Detail, want) {
+			t.Errorf("coverage finding does not mention %q: %s", want, f.Detail)
+		}
 	}
 }

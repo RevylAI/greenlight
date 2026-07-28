@@ -34,6 +34,15 @@ func findByPolicy(findings []Finding, policy string) *Finding {
 	return nil
 }
 
+func findByTitle(findings []Finding, title string) *Finding {
+	for i := range findings {
+		if findings[i].Title == title {
+			return &findings[i]
+		}
+	}
+	return nil
+}
+
 func countByPolicy(findings []Finding, policy string) int {
 	n := 0
 	for _, f := range findings {

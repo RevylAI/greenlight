@@ -138,7 +138,7 @@ Checks an Android app against Google Play's Developer Program Policies and its p
 
 Deadlines:
 
-- Target API level. New apps and updates must target API 36 from August 31, 2026. Apps below API 35 already lose distribution to new users on newer devices. CRITICAL / HIGH
+- Target API level. New apps and updates must target API 36 from August 31, 2026. Apps below API 35 already lose distribution to new users on newer devices. CRITICAL / HIGH. Play runs a separate schedule for Wear OS, Android TV, Automotive, and XR, so an app declaring one of those form factors gets a WARN naming its track instead of a blocking finding on the phone schedule.
 - Play Billing Library. v7 and below lose support on August 31, 2026, and there is no direct v7 to v9 upgrade path. Versions reached through a variable or a version catalog `version.ref` are resolved. HIGH
 
 Restricted permissions, each of which needs an approved use case or a declaration form:
@@ -162,9 +162,20 @@ Manifest and build:
 - An ads SDK shipped without `com.google.android.gms.permission.AD_ID`, which silently returns a zeroed advertising ID
 - Account creation without the required in-app *and* web deletion paths
 
-`--apk` and `--aab` read the *merged* manifest, so they see permissions contributed by library manifests that a source scan structurally cannot. Every check above runs against a built artifact, plus native code:
+`--apk` and `--aab` read the *merged* manifest, so they see permissions contributed by library manifests that a source scan structurally cannot. Every manifest and permission check above runs against a built artifact, plus the native code checks below.
+
+The three checks that read the Gradle model (Play Billing version, ads-SDK detection, auth-SDK detection) cannot run on an archive, because a built artifact does not carry one. The scan reports that gap as a finding rather than staying silent, so a clean artifact scan is never mistaken for a clean scan of everything. Source and artifact are complementary; `preflight` accepts both at once:
+
+```bash
+greenlight preflight . --aab app-release.aab
+```
+
+Native code checks:
 
 - 16 KB page size. Google Play requires apps targeting Android 15+ to support 16 KB memory pages. Greenlight checks ELF `LOAD` segment alignment on `arm64-v8a` libraries, 16 KB zip alignment of uncompressed libraries, and `GNU_RELRO` presence. CRITICAL / HIGH
+- 64-bit requirement. Every 32-bit ABI must ship with its 64-bit counterpart, so `armeabi-v7a` without `arm64-v8a`, or `x86` without `x86_64`, is flagged. CRITICAL
+
+In an AAB, native code is read from every module rather than `base/` alone, so a library that ships in a feature module is checked like any other.
 
 Both formats are decoded in pure Go, an APK's compiled binary XML and an AAB's protobuf manifest alike, so no Android SDK, `aapt2`, or `bundletool` is required.
 
