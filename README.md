@@ -1,10 +1,15 @@
 # greenlight
 
+[![Release](https://img.shields.io/github/v/release/RevylAI/greenlight?color=2ea44f)](https://github.com/RevylAI/greenlight/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/go-1.24+-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Powered by Revyl](https://img.shields.io/badge/powered%20by-Revyl-1C1833)](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=badge)
+
 **Know before you submit.** Pre-submission compliance scanner for the Apple App Store and Google Play.
 
 Greenlight reads your app (source code, privacy manifests, Android manifests and Gradle builds, IPA binaries, App Store Connect metadata) and checks it against Apple's Review Guidelines and Google Play's Developer Program Policies. Every finding cites the rule it comes from. No account, no uploads, no network. A full preflight on a mid-size project finishes in single-digit milliseconds.
 
-One optional tier is different: `greenlight verify` runs your account-deletion, restore-purchases, and Sign in with Apple flows on a cloud device through [Revyl](https://revyl.com), to confirm they work rather than just exist in source. It needs a Revyl account and it is opt-in. Everything else on this page runs offline. See [`greenlight verify`](#greenlight-verify-path).
+A static scan can only prove a flow *exists*. `greenlight verify` proves it *works*: it runs your account-deletion, restore-purchases, and Sign in with Apple flows on a cloud device and fails the build if any of them dead-ends. That tier is powered by [Revyl](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=intro) and needs a free account. Everything else on this page runs offline. See [`greenlight verify`](#greenlight-verify-path).
 
 ## Install
 
@@ -201,7 +206,7 @@ API-based checks against your app in App Store Connect: metadata completeness, s
 
 ### `greenlight verify [path]`
 
-Static checks confirm a flow *exists* in your source. `verify` confirms it *works*, by handing flow-dependent guidelines to the [Revyl](https://revyl.com) CLI and running them on a cloud device.
+Static checks confirm a flow *exists* in your source. `verify` confirms it *works*, by handing flow-dependent guidelines to the [Revyl](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=verify) CLI and running them on a cloud device.
 
 This is the gap static analysis cannot close. A "Delete Account" button wired to nothing passes codescan: the string `deleteAccount` is in the source, §5.1.1 is suppressed, and you get GREENLIT. At runtime it dead-ends, and Apple rejects under §5.1.1(v). `verify` taps the button.
 
@@ -224,7 +229,15 @@ Only flows your app actually claims are run:
 
 A failed flow becomes a BLOCK that static analysis could never produce, with a shareable Revyl report link as evidence. `--open` follows the live session in your browser while it runs, and `--exit-code` gates CI on it.
 
-Unlike every other command here, `verify` is not offline. It needs the [`revyl` CLI](https://docs.revyl.com), a Revyl account (`revyl auth login`), and either a registered build or a local artifact to upload with `--artifact`. Revyl runs cloud simulators and emulators, so iOS takes a simulator `.app` and Android takes an `.apk`. A device `.ipa` is rejected with an explanation.
+Getting set up takes about two minutes:
+
+```bash
+brew install revylai/tap/revyl        # the device runner
+revyl auth login                      # free account, no card
+greenlight verify . --dry-run         # see the generated tests first
+```
+
+Unlike every other command here, `verify` is not offline: it needs the [`revyl` CLI](https://docs.revyl.com), an account, and either a registered build or a local artifact passed to `--artifact`. Revyl runs cloud simulators and emulators, so iOS takes a simulator `.app` and Android takes an `.apk`. A device `.ipa` is rejected with an explanation. [Create an account](https://app.revyl.ai/signup?utm_source=greenlight&utm_medium=readme&utm_campaign=verify).
 
 ### `greenlight guidelines`
 
@@ -266,6 +279,28 @@ That fails the job on any CRITICAL or HIGH finding, and on a scanner that crashe
 ```yaml
 - run: greenlight preflight . --format json --output greenlight-report.json --exit-code
 ```
+
+To gate on the runtime tier in the same step, add `--verify`. The runner needs an authenticated `revyl` CLI on PATH:
+
+```yaml
+- run: greenlight preflight . --verify --build-name "My App" --exit-code
+```
+
+## Where a static scan stops
+
+Greenlight reads text. That is the whole of it: source files, plists, manifests, and binaries, matched against rules. It is fast and it is free because it never runs your app.
+
+Which means there is a class of rejection it cannot see, structurally, no matter how many rules get added. A "Delete Account" button wired to nothing is the clean example. The string is in the source, so §5.1.1 is satisfied and greenlight prints GREENLIT. Apple taps the button, nothing happens, and you are rejected under §5.1.1(v), which costs you the fix plus another trip through review. Same for a Restore Purchases handler that catches its own error and returns, or a Sign in with Apple button behind a feature flag that is off in the release build.
+
+Every one of those ships green. Nothing in this repo can catch them, because catching them requires running the app.
+
+That is what `greenlight verify` does, and it is why [Revyl](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=static-ceiling) exists. Revyl runs mobile tests written in plain English on cloud devices, so the check is "the account is actually gone" instead of "the word `deleteAccount` appears in a file". Greenlight uses it for three flows. The same engine covers the rest of your app.
+
+```bash
+greenlight verify . --dry-run   # free, offline, shows you the tests it would run
+```
+
+Start with `--dry-run`. It generates the tests and prints them without touching a device or needing an account, so you can see whether the runtime tier is worth it before you [sign up](https://app.revyl.ai/signup?utm_source=greenlight&utm_medium=readme&utm_campaign=static-ceiling).
 
 ## Configuration (`.greenlight.yml`)
 
@@ -369,6 +404,10 @@ greenlight
 
 ## Built by Revyl
 
-Greenlight catches App Store rejections. [Revyl](https://revyl.com) catches bugs.
+Greenlight catches App Store rejections. [Revyl](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=footer) catches the bugs that get through.
 
-The mobile reliability platform. Write tests in natural language, run them on cloud devices.
+It is the mobile reliability platform behind `greenlight verify`: write tests in plain English, run them on cloud devices, catch the broken flows a static scan cannot see. Greenlight itself is MIT licensed and stays that way. Revyl is where you go when you want the rest of your app covered the way those three flows are.
+
+[Start free](https://app.revyl.ai/signup?utm_source=greenlight&utm_medium=readme&utm_campaign=footer) · [Docs](https://docs.revyl.com) · [revyl.com](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=footer)
+
+As a little easter egg for reading this far, here is one month of Revyl free: [`ng32jDS9`](https://app.revyl.ai/signup?promo=ng32jDS9&utm_source=greenlight&utm_medium=readme&utm_campaign=easter-egg) :)
