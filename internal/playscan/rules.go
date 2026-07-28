@@ -166,7 +166,7 @@ func rulePlayBillingVersion(c *ruleContext) []Finding {
 			"Play Billing Library 7 and below lose support and updates using them can no longer be published. %s. "+
 				"There is no direct 7-to-9 upgrade: the version 8 migration has to be done first.",
 			deadlinePhrase(billingDeadline)),
-		Fix:  fmt.Sprintf("Upgrade com.android.billingclient:billing to %d.x or higher, migrating through 8 if you are on 7.", minSupportedBillingMajor),
+		Fix:  fmt.Sprintf("Upgrade com.android.billingclient:billing to %d.x or higher.", minSupportedBillingMajor),
 		Doc:  docBillingDeprecat,
 		File: c.gradle.BillingFile,
 		Line: c.gradle.BillingLine,
