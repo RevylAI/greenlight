@@ -63,13 +63,29 @@ const (
 
 // featureFormFactors maps the <uses-feature> declaration that puts an app on a
 // non-phone Play track to that form factor.
+//
+// Every name here was read back from PackageManager's constant pool in
+// android.jar on android-34, -35 and -36, which all agree.
 var featureFormFactors = map[string]FormFactor{
-	"android.hardware.type.watch":       FormFactorWear,
-	"android.hardware.type.television":  FormFactorTV,
-	"android.software.leanback":         FormFactorTV,
-	"android.hardware.type.automotive":  FormFactorAutomotive,
-	"android.software.xr.immersive":     FormFactorXR,
-	"android.hardware.xr.head_tracking": FormFactorXR,
+	"android.hardware.type.watch":      FormFactorWear,
+	"android.hardware.type.television": FormFactorTV,
+	"android.software.leanback":        FormFactorTV,
+	"android.hardware.type.automotive": FormFactorAutomotive,
+}
+
+// xrFeaturePrefixes cover Android XR, which is matched by namespace rather than
+// by exact name.
+//
+// No XR feature constant appears in any android.jar shipped for API 34 to 36,
+// so an exact name could not be verified the way the ones above were. Guessing
+// one is how this rule broke before: two invented names meant no XR app ever
+// matched, and XR packages kept getting the phone track's blocking finding.
+// Matching the namespace is correct for every current XR feature
+// (android.software.xr.api.spatial, android.software.xr.api.openxr, the
+// android.hardware.xr.* inputs) and for ones added later.
+var xrFeaturePrefixes = []string{
+	"android.software.xr.",
+	"android.hardware.xr.",
 }
 
 // FormFactor reports the non-phone form factor this manifest declares, or
@@ -85,6 +101,11 @@ func (m *Manifest) FormFactor() FormFactor {
 		}
 		if ff, ok := featureFormFactors[f.Name]; ok {
 			return ff
+		}
+		for _, prefix := range xrFeaturePrefixes {
+			if strings.HasPrefix(f.Name, prefix) {
+				return FormFactorXR
+			}
 		}
 	}
 	return FormFactorPhone

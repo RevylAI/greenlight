@@ -15,7 +15,9 @@ func TestTargetAPILevelRespectsFormFactor(t *testing.T) {
 		{"wear", "android.hardware.type.watch", FormFactorWear},
 		{"tv", "android.software.leanback", FormFactorTV},
 		{"automotive", "android.hardware.type.automotive", FormFactorAutomotive},
-		{"xr", "android.software.xr.immersive", FormFactorXR},
+		{"xr spatial", "android.software.xr.api.spatial", FormFactorXR},
+		{"xr openxr", "android.software.xr.api.openxr", FormFactorXR},
+		{"xr hardware input", "android.hardware.xr.input.controller", FormFactorXR},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -69,5 +71,47 @@ func TestTargetAPILevelFormFactorCleanWhenCurrent(t *testing.T) {
 	}
 	if findings := ruleTargetAPILevel(c); len(findings) != 0 {
 		t.Errorf("want no findings, got %d: %s", len(findings), findings[0].Title)
+	}
+}
+
+// XR is matched by namespace, not by an exact constant name. The rule shipped
+// with two invented names (android.software.xr.immersive,
+// android.hardware.xr.head_tracking) that no real XR app declares, so no XR
+// package ever matched and they kept getting the phone track's blocking
+// finding. No XR constant appears in android.jar for API 34-36, so the
+// namespace is what can actually be relied on.
+func TestFormFactorMatchesXRByNamespace(t *testing.T) {
+	xr := []string{
+		"android.software.xr.api.spatial",
+		"android.software.xr.api.openxr",
+		"android.hardware.xr.input.controller",
+		"android.software.xr.something.added.later",
+	}
+	for _, name := range xr {
+		m := &Manifest{UsesFeatures: []UsesFeature{{Name: name}}}
+		if got := m.FormFactor(); got != FormFactorXR {
+			t.Errorf("%s: FormFactor = %q, want %q", name, got, FormFactorXR)
+		}
+	}
+
+	// The namespace must not swallow unrelated features that merely contain
+	// "xr", nor an XR feature the app says it does not require.
+	notXR := []string{
+		"android.hardware.camera",
+		"android.software.xrated", // not the xr namespace: no dot after xr
+		"com.example.xr.custom",
+	}
+	for _, name := range notXR {
+		m := &Manifest{UsesFeatures: []UsesFeature{{Name: name}}}
+		if got := m.FormFactor(); got != FormFactorPhone {
+			t.Errorf("%s: FormFactor = %q, want phone", name, got)
+		}
+	}
+
+	optional := &Manifest{UsesFeatures: []UsesFeature{
+		{Name: "android.software.xr.api.spatial", Required: "false"},
+	}}
+	if got := optional.FormFactor(); got != FormFactorPhone {
+		t.Errorf("optional XR feature: FormFactor = %q, want phone", got)
 	}
 }
