@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/RevylAI/greenlight/internal/codescan"
 )
 
 // Finding from privacy scan.
@@ -47,8 +49,11 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 			regexp.MustCompile(`(?i)(\.creationDate|\.modificationDate|\.contentModificationDate|fileModificationDate|URLResourceKey\.contentModification)`),
 			regexp.MustCompile(`(?i)(NSFileCreationDate|NSFileModificationDate)`),
 			regexp.MustCompile(`(?i)(\bstat\s*\(|\bfstat\s*\(|\blstat\s*\(|getattrlist)`),
+			// .NET file metadata APIs hit the same underlying syscalls in
+			// Unity/Xamarin iOS builds, so they carry the same declaration duty.
+			regexp.MustCompile(`(File|FileInfo|Directory|FileSystemInfo)\s*\.\s*\w*(CreationTime|LastWriteTime|LastAccessTime)`),
 		},
-		Languages:   []string{"swift", "objc", "typescript", "javascript"},
+		Languages:   []string{"swift", "objc", "typescript", "javascript", "csharp"},
 		Description: "Accessing file timestamps (creation date, modification date)",
 	},
 	{
@@ -87,9 +92,12 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)(UserDefaults|NSUserDefaults)`),
 			regexp.MustCompile(`(?i)(AsyncStorage|@react-native-async-storage)`),
+			// Unity's PlayerPrefs is backed by NSUserDefaults on Apple platforms,
+			// so every PlayerPrefs call is a UserDefaults access in the shipped app.
+			regexp.MustCompile(`\bPlayerPrefs\s*\.`),
 		},
-		Languages:   []string{"swift", "objc", "typescript", "javascript"},
-		Description: "Reading/writing UserDefaults (includes React Native AsyncStorage)",
+		Languages:   []string{"swift", "objc", "typescript", "javascript", "csharp"},
+		Description: "Reading/writing UserDefaults (includes React Native AsyncStorage and Unity PlayerPrefs)",
 	},
 }
 
@@ -145,6 +153,9 @@ func Scan(projectPath string) (*ScanResult, error) {
 		"build": true, "dist": true, ".expo": true,
 		"DerivedData": true, "vendor": true,
 	}
+	for d := range codescan.UnityGeneratedDirs(projectPath) {
+		skipDirs[d] = true
+	}
 
 	filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
@@ -167,8 +178,10 @@ func Scan(projectPath string) (*ScanResult, error) {
 
 		fullContent := strings.Join(lines, "\n")
 
-		// Check for ATT implementation
-		if regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency)`).MatchString(fullContent) {
+		// Check for ATT implementation. ATTrackingStatusBinding is Unity's ATT
+		// binding; NSUserTrackingUsageDescription in source means a build
+		// post-processor injects the ATT purpose string into Info.plist.
+		if regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency|ATTrackingStatusBinding|NSUserTrackingUsageDescription)`).MatchString(fullContent) {
 			hasATT = true
 		}
 
@@ -342,6 +355,8 @@ func detectLang(path string) string {
 		return "swift"
 	case ".m", ".h":
 		return "objc"
+	case ".cs":
+		return "csharp"
 	case ".ts", ".tsx":
 		return "typescript"
 	case ".js", ".jsx":
