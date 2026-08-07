@@ -164,14 +164,91 @@ func TestAntiPatternIgnoresComments(t *testing.T) {
 	}
 }
 
-// stripComments must not mistake `//` inside a string literal for a comment.
-func TestStripCommentsKeepsURLsInStrings(t *testing.T) {
-	got := stripComments(`var url = "https://example.com/path"; // trailing note`)
-	if !strings.Contains(got, "https://example.com/path") {
-		t.Errorf("URL inside a string literal was clipped: %q", got)
+// Comment stripping must not mistake `//` inside a string literal for a
+// comment, and must carry /* */ state across lines so a block comment's
+// continuation lines are stripped too.
+func TestStripCommentsMultiline(t *testing.T) {
+	got := stripCommentsMultiline([]string{
+		`var url = "https://example.com/path"; // trailing note`,
+		`/* TODO:`,
+		`   Sign in with Apple is not supported yet`,
+		`*/`,
+		`var live = "kept";`,
+	})
+
+	if !strings.Contains(got[0], "https://example.com/path") {
+		t.Errorf("URL inside a string literal was clipped: %q", got[0])
 	}
-	if strings.Contains(got, "trailing note") {
-		t.Errorf("trailing comment was not stripped: %q", got)
+	if strings.Contains(got[0], "trailing note") {
+		t.Errorf("trailing comment was not stripped: %q", got[0])
+	}
+	if strings.Contains(got[2], "Apple") {
+		t.Errorf("block-comment continuation line was not stripped: %q", got[2])
+	}
+	if !strings.Contains(got[4], "kept") {
+		t.Errorf("code after the block comment was lost: %q", got[4])
+	}
+}
+
+// A multi-line block comment must not satisfy an anti-pattern. Line-local
+// stripping left continuation lines exposed, so a TODO spanning two lines could
+// still disable the rule project-wide.
+func TestAntiPatternIgnoresBlockCommentContinuation(t *testing.T) {
+	r := ruleByID(t, "social-login-no-apple")
+
+	fc := csCtx(
+		`/*`,
+		` * TODO: Sign in with Apple is not supported yet.`,
+		` */`,
+		`public void LoginWithGoogle() { }`,
+	)
+	if r.AntiPatternMatched(fc) {
+		t.Error("a multi-line block comment must not count as SIWA evidence")
+	}
+}
+
+// Apple code signing appears in every iOS build script. It must not read as
+// Sign in with Apple, or one build file disables the 4.8 rule project-wide.
+func TestSIWADoesNotMatchCodeSigning(t *testing.T) {
+	r := ruleByID(t, "social-login-no-apple")
+
+	denied := []string{
+		`private const string APPLE_SIGNING_TEAM = "ABC123";`,
+		`// re-signing with apple distribution certificate`,
+		`var appleSigningIdentity = GetIdentity();`,
+	}
+	for _, line := range denied {
+		if r.AntiPatternMatched(csCtx(line)) {
+			t.Errorf("code-signing text must not count as SIWA: %q", line)
+		}
+	}
+
+	allowed := []string{
+		`            "APPLE_SIGNIN_RESULT_CANCELED",`,
+		`var provider = "apple-signin";`,
+		`auth.appleSignIn();`,
+		`showButton("Sign in with Apple");`,
+	}
+	for _, line := range allowed {
+		if !r.AntiPatternMatched(csCtx(line)) {
+			t.Errorf("real SIWA evidence must still count: %q", line)
+		}
+	}
+}
+
+// IAppleExtensions also carries deferred purchases, receipts and promo helpers.
+// Only the RestoreTransactions call proves a restore path exists.
+func TestRestoreRequiresTheActualCall(t *testing.T) {
+	r := ruleByID(t, "iap-no-restore")
+
+	receiptOnly := csCtx(`var apple = extensions.GetExtension<IAppleExtensions>();`)
+	if r.AntiPatternMatched(receiptOnly) {
+		t.Error("bare IAppleExtensions must not count as a restore implementation")
+	}
+
+	real := csCtx(`extensions.GetExtension<IAppleExtensions>().RestoreTransactions(OnRestore);`)
+	if !r.AntiPatternMatched(real) {
+		t.Error("RestoreTransactions must count as a restore implementation")
 	}
 }
 
@@ -187,12 +264,68 @@ func TestUnityGeneratedDirs(t *testing.T) {
 		t.Fatal(err)
 	}
 	dirs := UnityGeneratedDirs(unity)
-	if !dirs["Library"] || !dirs["Temp"] {
-		t.Errorf("Unity project should skip Library/Temp, got %v", dirs)
+	if !dirs[filepath.Join(unity, "Library")] || !dirs[filepath.Join(unity, "Temp")] {
+		t.Errorf("Unity project should skip root Library/Temp, got %v", dirs)
+	}
+
+	// Only the root-level directories. Game source under Assets/Scripts/Logs or a
+	// plugin's own Library/ must stay in scope.
+	for _, nested := range []string{
+		filepath.Join(unity, "Assets", "Scripts", "Logs"),
+		filepath.Join(unity, "Assets", "Plugins", "SomeSDK", "Library"),
+	} {
+		if dirs[nested] {
+			t.Errorf("nested folder must not be skipped: %s", nested)
+		}
 	}
 
 	if dirs := UnityGeneratedDirs(t.TempDir()); dirs != nil {
 		t.Errorf("non-Unity project must not skip anything, got %v", dirs)
+	}
+}
+
+// End-to-end: a .cs file under Assets/Scripts/Logs must still be scanned, while
+// the root Library/ is skipped.
+func TestNestedUnityLikeFoldersStayInScope(t *testing.T) {
+	root := t.TempDir()
+	mk := func(parts ...string) string {
+		t.Helper()
+		dir := filepath.Join(append([]string{root}, parts...)...)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return dir
+	}
+	write := func(dir, name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(mk("ProjectSettings"), "ProjectSettings.asset", "m_EditorVersion: 6000.3.9f1\n")
+	write(mk("Assets", "Scripts", "Logs"), "Logger.cs", "class Logger {}\n")
+	write(mk("Library", "ScriptAssemblies"), "Cached.cs", "class Cached {}\n")
+
+	files, err := (&Scanner{root: root}).collectFiles()
+	if err != nil {
+		t.Fatalf("collectFiles: %v", err)
+	}
+
+	var sawNested, sawLibrary bool
+	for _, f := range files {
+		if strings.Contains(f.RelPath, "Logger.cs") {
+			sawNested = true
+		}
+		if strings.Contains(f.RelPath, "Cached.cs") {
+			sawLibrary = true
+		}
+	}
+	if !sawNested {
+		t.Error("Assets/Scripts/Logs/Logger.cs must be scanned")
+	}
+	if sawLibrary {
+		t.Error("root Library/ must be skipped")
 	}
 }
 

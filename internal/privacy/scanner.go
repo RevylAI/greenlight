@@ -153,13 +153,11 @@ func Scan(projectPath string) (*ScanResult, error) {
 		"build": true, "dist": true, ".expo": true,
 		"DerivedData": true, "vendor": true,
 	}
-	for d := range codescan.UnityGeneratedDirs(projectPath) {
-		skipDirs[d] = true
-	}
+	unitySkip := codescan.UnityGeneratedDirs(projectPath)
 
 	filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info.IsDir() {
-			if info != nil && info.IsDir() && skipDirs[info.Name()] {
+			if info != nil && info.IsDir() && (skipDirs[info.Name()] || unitySkip[path]) {
 				return filepath.SkipDir
 			}
 			return nil

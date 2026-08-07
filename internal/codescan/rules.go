@@ -120,10 +120,11 @@ func AllRules() []Rule {
 				regexp.MustCompile(`(?i)(google.*sign.*in|GIDSignIn|GoogleSignin|facebook.*login|FBSDKLoginManager|LoginManager\.logIn)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				// `apple.*sign.*in` mirrors the google trigger above: auth SDKs
-				// abstract SIWA behind provider constants like APPLE_SIGNIN_RESULT_*,
-				// never naming ASAuthorization* directly.
-				regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication|apple.*sign.*in|sign.*in.*with.*apple)`),
+				// Auth SDKs abstract SIWA behind provider constants like
+				// APPLE_SIGNIN_RESULT_*, never naming ASAuthorization* directly.
+				// The trailing [^gG] keeps "apple ... signing" (code signing, which
+				// appears in every iOS build script) from passing as sign-IN.
+				regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication|apple[_\s-]*sign[_\s-]?in([^gG]|$)|sign[_\s-]?in[_\s-]?with[_\s-]?apple)`),
 			},
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
@@ -143,8 +144,11 @@ func AllRules() []Rule {
 				regexp.MustCompile(`(?i)(UnityEngine\.Purchasing|UnityPurchasing\.|IStoreListener|IDetailedStoreListener|CodelessIAPStoreListener)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				// IAppleExtensions.RestoreTransactions is Unity IAP's restore path.
-				regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases|RestoreTransactions|IAppleExtensions)`),
+				// RestoreTransactions is Unity IAP's restore call. Matching the
+				// IAppleExtensions interface itself would be wrong — it also carries
+				// deferred purchases, receipts and promo helpers, so an app that only
+				// reads a receipt would look like it implements restore.
+				regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases|RestoreTransactions)`),
 			},
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
@@ -368,13 +372,15 @@ func (r *PatternRule) HasGlobalAntiPatterns() bool {
 }
 
 func (r *PatternRule) AntiPatternMatched(fc FileContext) bool {
-	for _, line := range fc.Lines {
-		// An anti-pattern asserts the feature IS implemented, and a comment is
-		// never evidence of that — `// TODO: Sign in with Apple not supported yet`
-		// says the opposite, yet would otherwise suppress the rule project-wide.
-		// String literals stay: SDK-driven implementations name their providers in
-		// strings (e.g. an "APPLE_SIGNIN_RESULT_CANCELED" error-code constant).
-		code := stripComments(line)
+	// An anti-pattern asserts the feature IS implemented, and a comment is never
+	// evidence of that — `// TODO: Sign in with Apple not supported yet` says the
+	// opposite, yet would otherwise suppress the rule project-wide. Stripping runs
+	// over the whole file so a /* … */ block spanning lines is fully removed;
+	// line-local stripping would leave its continuation lines exposed.
+	//
+	// String literals stay: SDK-driven implementations name their providers in
+	// strings (e.g. an "APPLE_SIGNIN_RESULT_CANCELED" error-code constant).
+	for _, code := range stripCommentsMultiline(fc.Lines) {
 		for _, ap := range r.antiPatterns {
 			if ap.MatchString(code) {
 				return true
@@ -471,42 +477,52 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 // and removes // line comments and /* */ block comments, so codeOnly rules match
 // only real code. It's a lightweight scan (no escaped-quote handling), which is
 // enough to keep call-shaped text like "UIWebView()" out of the match.
-// stripComments blanks comments while preserving string literals. It is
-// string-aware so a `//` inside a literal (e.g. "https://example.com") is not
-// mistaken for the start of a comment.
-func stripComments(line string) string {
-	var b strings.Builder
-	b.Grow(len(line))
-	inStr := false
-	var quote byte
-	for i := 0; i < len(line); i++ {
-		c := line[i]
-		if inStr {
-			b.WriteByte(c)
-			if c == quote {
-				inStr = false
+// stripCommentsMultiline blanks comments across a file while preserving string
+// literals, carrying /* … */ state between lines so a block comment's
+// continuation lines are stripped too. It is string-aware, so a `//` inside a
+// literal (e.g. "https://example.com") is not mistaken for a comment.
+func stripCommentsMultiline(lines []string) []string {
+	out := make([]string, len(lines))
+	inBlock := false
+
+	for i, line := range lines {
+		var b strings.Builder
+		b.Grow(len(line))
+		inStr := false
+		var quote byte
+
+	scan:
+		for j := 0; j < len(line); j++ {
+			c := line[j]
+			switch {
+			case inBlock:
+				if c == '*' && j+1 < len(line) && line[j+1] == '/' {
+					inBlock = false
+					j++
+				}
+				b.WriteByte(' ')
+			case inStr:
+				b.WriteByte(c)
+				if c == quote {
+					inStr = false
+				}
+			case c == '"' || c == '\'' || c == '`':
+				inStr = true
+				quote = c
+				b.WriteByte(c)
+			case c == '/' && j+1 < len(line) && line[j+1] == '/':
+				break scan // rest of the line is a comment
+			case c == '/' && j+1 < len(line) && line[j+1] == '*':
+				inBlock = true
+				j++
+				b.WriteByte(' ')
+			default:
+				b.WriteByte(c)
 			}
-			continue
 		}
-		switch {
-		case c == '"' || c == '\'' || c == '`':
-			inStr = true
-			quote = c
-			b.WriteByte(c)
-		case c == '/' && i+1 < len(line) && line[i+1] == '/':
-			return b.String() // rest of the line is a comment
-		case c == '/' && i+1 < len(line) && line[i+1] == '*':
-			end := strings.Index(line[i+2:], "*/")
-			if end < 0 {
-				return b.String() // unterminated block comment
-			}
-			i += end + 3 // skip past the closing */
-			b.WriteByte(' ')
-		default:
-			b.WriteByte(c)
-		}
+		out[i] = b.String()
 	}
-	return b.String()
+	return out
 }
 
 func stripStringsAndComments(line string) string {

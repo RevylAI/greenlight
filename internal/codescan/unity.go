@@ -13,18 +13,24 @@ var unityGeneratedDirNames = []string{
 	"Library", "Temp", "Logs", "obj", "UserSettings",
 }
 
-// UnityGeneratedDirs returns the set of Unity-generated directory names to skip
-// under root, or nil when root is not a Unity project. Detection keys off
-// ProjectSettings/ProjectSettings.asset, which every Unity project has and
-// nothing else does — a bare directory named "Library" is perfectly normal in
-// other ecosystems, so the skip list must never apply outside Unity.
+// UnityGeneratedDirs returns the full paths of Unity-generated directories
+// directly under root, or nil when root is not a Unity project.
+//
+// Paths, not names: the editor only generates these as siblings of Assets/, so
+// matching by basename at any depth would also skip real game source in folders
+// like Assets/Scripts/Logs or a plugin's own Library/ — a silent blind spot in
+// exactly the tree we are here to scan.
+//
+// Detection keys off ProjectSettings/ProjectSettings.asset, which every Unity
+// project has and nothing else does; a directory named "Library" is perfectly
+// normal elsewhere, so the skip list must never apply outside Unity.
 func UnityGeneratedDirs(root string) map[string]bool {
 	if !IsUnityProject(root) {
 		return nil
 	}
 	dirs := make(map[string]bool, len(unityGeneratedDirNames))
 	for _, d := range unityGeneratedDirNames {
-		dirs[d] = true
+		dirs[filepath.Join(root, d)] = true
 	}
 	return dirs
 }

@@ -159,9 +159,7 @@ func (s *Scanner) collectFiles() ([]FileContext, error) {
 		"build": true, "dist": true, ".expo": true,
 		"DerivedData": true, ".next": true, "vendor": true,
 	}
-	for d := range UnityGeneratedDirs(s.root) {
-		skipDirs[d] = true
-	}
+	unitySkip := UnityGeneratedDirs(s.root)
 
 	err := filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -169,7 +167,7 @@ func (s *Scanner) collectFiles() ([]FileContext, error) {
 		}
 
 		if info.IsDir() {
-			if skipDirs[info.Name()] {
+			if skipDirs[info.Name()] || unitySkip[path] {
 				return filepath.SkipDir
 			}
 			return nil
