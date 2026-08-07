@@ -159,6 +159,7 @@ func (s *Scanner) collectFiles() ([]FileContext, error) {
 		"build": true, "dist": true, ".expo": true,
 		"DerivedData": true, ".next": true, "vendor": true,
 	}
+	unitySkip := UnityGeneratedDirs(s.root)
 
 	err := filepath.Walk(s.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -166,7 +167,7 @@ func (s *Scanner) collectFiles() ([]FileContext, error) {
 		}
 
 		if info.IsDir() {
-			if skipDirs[info.Name()] {
+			if skipDirs[info.Name()] || unitySkip[path] {
 				return filepath.SkipDir
 			}
 			return nil
@@ -210,6 +211,8 @@ func detectLanguage(path string) string {
 		return "swift"
 	case ".m", ".h", ".mm":
 		return "objc"
+	case ".cs":
+		return "csharp"
 	case ".ts", ".tsx":
 		return "typescript"
 	case ".js", ".jsx":

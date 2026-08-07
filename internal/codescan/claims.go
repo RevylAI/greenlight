@@ -29,13 +29,13 @@ type Claims struct {
 // rules (account-no-delete, iap-no-restore, social-login-no-apple). Kept in sync
 // deliberately: the runtime tier re-checks exactly the flows static can only guess.
 var (
-	reAccountCreation = regexp.MustCompile(`(?i)(createAccount|signUp|register.*user|create.*account|auth\(\)\.createUser)`)
-	reIAP             = regexp.MustCompile(`(?i)(SKPaymentQueue|StoreKit|Product\.purchase|purchaseProduct|expo-in-app-purchases|react-native-iap|RevenueCat)`)
+	reAccountCreation = regexp.MustCompile(`(?i)(createAccount|signUp|register.*user\b|create.*account|auth\(\)\.createUser)`)
+	reIAP             = regexp.MustCompile(`(?i)(SKPaymentQueue|StoreKit|Product\.purchase|purchaseProduct|expo-in-app-purchases|react-native-iap|RevenueCat|UnityEngine\.Purchasing|UnityPurchasing\.|IStoreListener|IDetailedStoreListener|CodelessIAPStoreListener)`)
 	reSocialLogin     = regexp.MustCompile(`(?i)(google.*sign.*in|GIDSignIn|GoogleSignin|facebook.*login|FBSDKLoginManager|LoginManager\.logIn)`)
 
 	reDeleteAccount = regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet|close.*account|closeAccount|cancel.*account|delete.*my.*account|erase.*account)`)
-	reRestore       = regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases)`)
-	reSiwA          = regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication)`)
+	reRestore       = regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases|RestoreTransactions)`)
+	reSiwA          = regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication|apple[_\s-]*sign[_\s-]?in([^gG]|$)|sign[_\s-]?in[_\s-]?with[_\s-]?apple)`)
 )
 
 // DetectClaims walks the project — reusing the scanner's file collection and
@@ -50,7 +50,7 @@ func DetectClaims(root string) (Claims, error) {
 	var c Claims
 	for _, fc := range files {
 		switch fc.Language {
-		case "swift", "objc", "typescript", "javascript":
+		case "swift", "objc", "typescript", "javascript", "csharp":
 		default:
 			continue // ignore plist/json config — claims live in source
 		}
