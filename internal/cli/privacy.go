@@ -123,7 +123,7 @@ func writePrivacyTerminal(w *os.File, result *privacy.ScanResult, elapsed time.D
 	if len(result.Findings) == 0 {
 		green.Fprintln(w, "  No privacy issues found!")
 		fmt.Fprintln(w)
-		printPrivacyFooter(0, 0, 0, elapsed)
+		printPrivacyFooter(w, 0, 0, 0, elapsed)
 		return nil
 	}
 
@@ -191,7 +191,7 @@ func writePrivacyTerminal(w *os.File, result *privacy.ScanResult, elapsed time.D
 		}
 	}
 
-	printPrivacyFooter(len(criticals), len(warns), len(infos), elapsed)
+	printPrivacyFooter(w, len(criticals), len(warns), len(infos), elapsed)
 	return nil
 }
 
@@ -209,46 +209,46 @@ func writePrivacyJSON(w *os.File, result *privacy.ScanResult, elapsed time.Durat
 	return enc.Encode(output)
 }
 
-func printPrivacyFooter(criticals, warns, infos int, elapsed time.Duration) {
+func printPrivacyFooter(w *os.File, criticals, warns, infos int, elapsed time.Duration) {
 	red := color.New(color.FgRed, color.Bold)
 	green := color.New(color.FgGreen, color.Bold)
 	total := criticals + warns + infos
 
-	dim.Fprintln(os.Stdout, "  ─────────────────────────────────────────────")
-	fmt.Println()
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprintln(w)
 
 	if criticals == 0 {
-		green.Fprint(os.Stdout, "  GREENLIT")
-		fmt.Fprint(os.Stdout, " — privacy compliance looks good")
+		green.Fprint(w, "  GREENLIT")
+		fmt.Fprint(w, " — privacy compliance looks good")
 	} else {
-		red.Fprint(os.Stdout, "  NOT READY")
-		fmt.Fprintf(os.Stdout, " — %d critical privacy issue(s)", criticals)
+		red.Fprint(w, "  NOT READY")
+		fmt.Fprintf(w, " — %d critical privacy issue(s)", criticals)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	if total > 0 {
-		fmt.Fprintf(os.Stdout, "  %d findings: ", total)
+		fmt.Fprintf(w, "  %d findings: ", total)
 		if criticals > 0 {
-			red.Fprintf(os.Stdout, "%d critical  ", criticals)
+			red.Fprintf(w, "%d critical  ", criticals)
 		}
 		if warns > 0 {
-			color.New(color.FgYellow).Fprintf(os.Stdout, "%d warn  ", warns)
+			color.New(color.FgYellow).Fprintf(w, "%d warn  ", warns)
 		}
 		if infos > 0 {
-			dim.Fprintf(os.Stdout, "%d info", infos)
+			dim.Fprintf(w, "%d info", infos)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 
-	dim.Fprintf(os.Stdout, "  completed in %s\n", elapsed.Round(time.Millisecond))
+	dim.Fprintf(w, "  completed in %s\n", elapsed.Round(time.Millisecond))
 
-	fmt.Println()
-	dim.Fprintln(os.Stdout, "  ─────────────────────────────────────────────")
-	fmt.Fprint(os.Stdout, "  Built by ")
-	purple.Fprint(os.Stdout, "Revyl")
-	fmt.Fprintln(os.Stdout, " — the mobile reliability platform")
-	dim.Fprintln(os.Stdout, "  Catch more than rejections. Catch bugs.")
-	fmt.Fprint(os.Stdout, "  ")
-	color.New(color.Underline).Fprintln(os.Stdout, "https://revyl.com")
-	fmt.Println()
+	fmt.Fprintln(w)
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprint(w, "  Built by ")
+	purple.Fprint(w, "Revyl")
+	fmt.Fprintln(w, " — the mobile reliability platform")
+	dim.Fprintln(w, "  Catch more than rejections. Catch bugs.")
+	fmt.Fprint(w, "  ")
+	color.New(color.Underline).Fprintln(w, "https://revyl.com")
+	fmt.Fprintln(w)
 }
