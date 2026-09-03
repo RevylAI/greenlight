@@ -20,6 +20,36 @@ type Finding struct {
 	Line      int    `json:"line,omitempty"`
 }
 
+// Summary holds aggregate results.
+type Summary struct {
+	Total        int  `json:"total"`
+	Critical     int  `json:"critical"`
+	High         int  `json:"high"`
+	Warns        int  `json:"warns"`
+	Infos        int  `json:"infos"`
+	FilesScanned int  `json:"files_scanned"`
+	Passed       bool `json:"passed"`
+}
+
+func ComputeSummary(findings []Finding, filesScanned int) Summary {
+	s := Summary{FilesScanned: filesScanned}
+	for _, f := range findings {
+		s.Total++
+		switch f.Severity {
+		case "CRITICAL":
+			s.Critical++
+		case "HIGH":
+			s.High++
+		case "WARN":
+			s.Warns++
+		case "INFO":
+			s.Infos++
+		}
+	}
+	s.Passed = s.Critical == 0
+	return s
+}
+
 // RequiredReasonAPI represents an Apple Required Reason API category.
 type RequiredReasonAPI struct {
 	Name        string           // Human-readable name
@@ -37,6 +67,7 @@ type ScanResult struct {
 	DeclaredAPIs   []string  `json:"declared_apis"`
 	TrackingSDKs   []string  `json:"tracking_sdks,omitempty"`
 	Findings       []Finding `json:"findings"`
+	Summary        Summary   `json:"summary"`
 }
 
 var requiredReasonAPIs = []RequiredReasonAPI{
@@ -264,6 +295,7 @@ func Scan(projectPath string) (*ScanResult, error) {
 		})
 	}
 
+	result.Summary = ComputeSummary(result.Findings, 0)
 	return result, nil
 }
 

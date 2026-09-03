@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/RevylAI/greenlight/internal/ipa"
@@ -10,7 +12,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var ipaFormat string
+var (
+	ipaFormat string
+	ipaOutput string
+)
 
 var ipaCmd = &cobra.Command{
 	Use:   "ipa <path-to-ipa>",
@@ -34,6 +39,7 @@ No App Store Connect account needed — works entirely offline.`,
 
 func init() {
 	ipaCmd.Flags().StringVar(&ipaFormat, "format", "terminal", "output format: terminal, json")
+	ipaCmd.Flags().StringVar(&ipaOutput, "output", "", "write report to file (stdout if omitted)")
 	rootCmd.AddCommand(ipaCmd)
 }
 
@@ -44,8 +50,11 @@ func runIPA(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("IPA file not found: %s", ipaPath)
 	}
 
-	purple.Println("\n  greenlight ipa — inspect your binary before submission.")
-	fmt.Printf("  IPA: %s\n\n", ipaPath)
+	format := strings.ToLower(ipaFormat)
+	if format != "json" {
+		purple.Println("\n  greenlight ipa — inspect your binary before submission.")
+		fmt.Printf("  IPA: %s\n\n", ipaPath)
+	}
 
 	start := time.Now()
 	result, err := ipa.Inspect(ipaPath)
@@ -54,16 +63,36 @@ func runIPA(cmd *cobra.Command, args []string) error {
 	}
 	elapsed := time.Since(start)
 
+	var output *os.File
+	if ipaOutput != "" {
+		output, err = os.Create(ipaOutput)
+		if err != nil {
+			return fmt.Errorf("failed to create output file: %w", err)
+		}
+		defer output.Close()
+	} else {
+		output = os.Stdout
+	}
+
+	switch format {
+	case "json":
+		return writeIPAJSON(output, result, elapsed)
+	default:
+		return writeIPATerminal(output, result, elapsed)
+	}
+}
+
+func writeIPATerminal(w *os.File, result *ipa.InspectResult, elapsed time.Duration) error {
 	if result.AppName != "" {
-		fmt.Printf("  App:  %s\n", result.AppName)
+		fmt.Fprintf(w, "  App:  %s\n", result.AppName)
 	}
 	sizeMB := float64(result.Size) / (1024 * 1024)
-	fmt.Printf("  Size: %.1fMB\n\n", sizeMB)
+	fmt.Fprintf(w, "  Size: %.1fMB\n\n", sizeMB)
 
 	if len(result.Findings) == 0 {
-		color.New(color.FgGreen, color.Bold).Fprintln(os.Stdout, "  No issues found!")
-		fmt.Println()
-		printIPAFooter(0, 0, 0, elapsed)
+		color.New(color.FgGreen, color.Bold).Fprintln(w, "  No issues found!")
+		fmt.Fprintln(w)
+		printIPAFooter(w, 0, 0, 0, elapsed)
 		return nil
 	}
 
@@ -86,105 +115,155 @@ func runIPA(cmd *cobra.Command, args []string) error {
 	bold := color.New(color.Bold)
 
 	if len(criticals) > 0 {
-		red.Println("  CRITICAL — Will be rejected")
-		fmt.Println()
+		red.Fprintln(w, "  CRITICAL — Will be rejected")
+		fmt.Fprintln(w)
 		for _, f := range criticals {
-			red.Fprint(os.Stdout, "  [CRITICAL] ")
+			red.Fprint(w, "  [CRITICAL] ")
 			if f.Guideline != "" {
-				bold.Fprintf(os.Stdout, "§%s ", f.Guideline)
+				bold.Fprintf(w, "§%s ", f.Guideline)
 			}
-			bold.Fprintln(os.Stdout, f.Title)
-			fmt.Printf("             %s\n", f.Detail)
+			bold.Fprintln(w, f.Title)
+			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.Fix != "" {
-				green.Fprint(os.Stdout, "             Fix: ")
-				fmt.Println(f.Fix)
+				green.Fprint(w, "             Fix: ")
+				fmt.Fprintln(w, f.Fix)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 
 	if len(warns) > 0 {
-		yellow.Println("  WARNING — High rejection risk")
-		fmt.Println()
+		yellow.Fprintln(w, "  WARNING — High rejection risk")
+		fmt.Fprintln(w)
 		for _, f := range warns {
-			yellow.Fprint(os.Stdout, "  [WARN]     ")
+			yellow.Fprint(w, "  [WARN]     ")
 			if f.Guideline != "" {
-				bold.Fprintf(os.Stdout, "§%s ", f.Guideline)
+				bold.Fprintf(w, "§%s ", f.Guideline)
 			}
-			bold.Fprintln(os.Stdout, f.Title)
-			fmt.Printf("             %s\n", f.Detail)
+			bold.Fprintln(w, f.Title)
+			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.Fix != "" {
-				green.Fprint(os.Stdout, "             Fix: ")
-				fmt.Println(f.Fix)
+				green.Fprint(w, "             Fix: ")
+				fmt.Fprintln(w, f.Fix)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 
 	if len(infos) > 0 {
-		dim.Println("  INFO — Best practices")
-		fmt.Println()
+		dim.Fprintln(w, "  INFO — Best practices")
+		fmt.Fprintln(w)
 		for _, f := range infos {
-			dim.Fprint(os.Stdout, "  [INFO]     ")
+			dim.Fprint(w, "  [INFO]     ")
 			if f.Guideline != "" {
-				bold.Fprintf(os.Stdout, "§%s ", f.Guideline)
+				bold.Fprintf(w, "§%s ", f.Guideline)
 			}
-			bold.Fprintln(os.Stdout, f.Title)
-			fmt.Printf("             %s\n", f.Detail)
+			bold.Fprintln(w, f.Title)
+			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.Fix != "" {
-				green.Fprint(os.Stdout, "             Fix: ")
-				fmt.Println(f.Fix)
+				green.Fprint(w, "             Fix: ")
+				fmt.Fprintln(w, f.Fix)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 
-	printIPAFooter(len(criticals), len(warns), len(infos), elapsed)
+	printIPAFooter(w, len(criticals), len(warns), len(infos), elapsed)
 	return nil
 }
 
-func printIPAFooter(criticals, warns, infos int, elapsed time.Duration) {
+func printIPAFooter(w *os.File, criticals, warns, infos int, elapsed time.Duration) {
 	red := color.New(color.FgRed, color.Bold)
 	green := color.New(color.FgGreen, color.Bold)
 	total := criticals + warns + infos
 
-	dim.Fprintln(os.Stdout, "  ─────────────────────────────────────────────")
-	fmt.Println()
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprintln(w)
 
 	if criticals == 0 {
-		green.Fprint(os.Stdout, "  GREENLIT")
-		fmt.Fprint(os.Stdout, " — no critical issues in binary")
+		green.Fprint(w, "  GREENLIT")
+		fmt.Fprint(w, " — no critical issues in binary")
 	} else {
-		red.Fprint(os.Stdout, "  NOT READY")
-		fmt.Fprintf(os.Stdout, " — %d critical issue(s) must be fixed", criticals)
+		red.Fprint(w, "  NOT READY")
+		fmt.Fprintf(w, " — %d critical issue(s) must be fixed", criticals)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	if total > 0 {
-		fmt.Fprintf(os.Stdout, "  %d findings: ", total)
+		fmt.Fprintf(w, "  %d findings: ", total)
 		if criticals > 0 {
-			red.Fprintf(os.Stdout, "%d critical  ", criticals)
+			red.Fprintf(w, "%d critical  ", criticals)
 		}
 		if warns > 0 {
-			color.New(color.FgYellow).Fprintf(os.Stdout, "%d warn  ", warns)
+			color.New(color.FgYellow).Fprintf(w, "%d warn  ", warns)
 		}
 		if infos > 0 {
-			dim.Fprintf(os.Stdout, "%d info", infos)
+			dim.Fprintf(w, "%d info", infos)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 
-	dim.Fprintf(os.Stdout, "  completed in %s\n", elapsed.Round(time.Millisecond))
+	dim.Fprintf(w, "  completed in %s\n", elapsed.Round(time.Millisecond))
 
-	fmt.Println()
-	dim.Fprintln(os.Stdout, "  ─────────────────────────────────────────────")
-	fmt.Fprint(os.Stdout, "  Built by ")
-	purple.Fprint(os.Stdout, "Revyl")
-	fmt.Fprintln(os.Stdout, " — the mobile reliability platform")
-	dim.Fprintln(os.Stdout, "  Catch more than rejections. Catch bugs.")
-	fmt.Fprint(os.Stdout, "  ")
-	color.New(color.Underline).Fprintln(os.Stdout, "https://revyl.com")
-	fmt.Println()
+	fmt.Fprintln(w)
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprint(w, "  Built by ")
+	purple.Fprint(w, "Revyl")
+	fmt.Fprintln(w, " — the mobile reliability platform")
+	dim.Fprintln(w, "  Catch more than rejections. Catch bugs.")
+	fmt.Fprint(w, "  ")
+	color.New(color.Underline).Fprintln(w, "https://revyl.com")
+	fmt.Fprintln(w)
 
 	return
+}
+
+func writeIPAJSON(w *os.File, result *ipa.InspectResult, elapsed time.Duration) error {
+	// Derive summary counts for JSON consumers (mirrors preflight/codescan summary).
+	var criticals, warns, infos int
+	for _, f := range result.Findings {
+		switch f.Severity {
+		case "CRITICAL":
+			criticals++
+		case "WARN":
+			warns++
+		case "INFO":
+			infos++
+		}
+	}
+	payload := struct {
+		IPAPath  string       `json:"ipa_path"`
+		AppName  string       `json:"app_name"`
+		BundleID string       `json:"bundle_id,omitempty"`
+		Size     int64        `json:"size_bytes"`
+		Findings []ipa.Finding `json:"findings"`
+		Summary  struct {
+			Total    int  `json:"total"`
+			Critical int  `json:"critical"`
+			Warns    int  `json:"warns"`
+			Infos    int  `json:"infos"`
+			Passed   bool `json:"passed"`
+		} `json:"summary"`
+		Elapsed string `json:"elapsed"`
+	}{
+		IPAPath:  result.IPAPath,
+		AppName:  result.AppName,
+		BundleID: result.BundleID,
+		Size:     result.Size,
+		Findings: result.Findings,
+		Elapsed:  elapsed.Round(time.Millisecond).String(),
+	}
+	// Ensure empty findings encodes as [] not null.
+	if payload.Findings == nil {
+		payload.Findings = []ipa.Finding{}
+	}
+	payload.Summary.Total = len(result.Findings)
+	payload.Summary.Critical = criticals
+	payload.Summary.Warns = warns
+	payload.Summary.Infos = infos
+	payload.Summary.Passed = criticals == 0
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(payload)
 }

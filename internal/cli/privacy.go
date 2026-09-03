@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -9,6 +10,11 @@ import (
 	"github.com/RevylAI/greenlight/internal/privacy"
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
+)
+
+var (
+	privacyFormat string
+	privacyOutput string
 )
 
 var privacyCmd = &cobra.Command{
@@ -33,6 +39,8 @@ No App Store Connect account needed — runs entirely offline.`,
 }
 
 func init() {
+	privacyCmd.Flags().StringVar(&privacyFormat, "format", "terminal", "output format: terminal, json")
+	privacyCmd.Flags().StringVar(&privacyOutput, "output", "", "write report to file (stdout if omitted)")
 	rootCmd.AddCommand(privacyCmd)
 }
 
@@ -50,8 +58,11 @@ func runPrivacy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path must be a directory: %s", path)
 	}
 
-	purple.Println("\n  greenlight privacy — validate your privacy compliance.")
-	fmt.Printf("  Scanning: %s\n\n", path)
+	format := strings.ToLower(privacyFormat)
+	if format != "json" {
+		purple.Println("\n  greenlight privacy — validate your privacy compliance.")
+		fmt.Printf("  Scanning: %s\n\n", path)
+	}
 
 	start := time.Now()
 	result, err := privacy.Scan(path)
@@ -60,6 +71,26 @@ func runPrivacy(cmd *cobra.Command, args []string) error {
 	}
 	elapsed := time.Since(start)
 
+	var output *os.File
+	if privacyOutput != "" {
+		output, err = os.Create(privacyOutput)
+		if err != nil {
+			return fmt.Errorf("failed to create output file: %w", err)
+		}
+		defer output.Close()
+	} else {
+		output = os.Stdout
+	}
+
+	switch format {
+	case "json":
+		return writePrivacyJSON(output, result, elapsed)
+	default:
+		return writePrivacyTerminal(output, result, elapsed)
+	}
+}
+
+func writePrivacyTerminal(w *os.File, result *privacy.ScanResult, elapsed time.Duration) error {
 	red := color.New(color.FgRed, color.Bold)
 	yellow := color.New(color.FgYellow)
 	green := color.New(color.FgGreen)
@@ -67,32 +98,32 @@ func runPrivacy(cmd *cobra.Command, args []string) error {
 
 	// Status summary
 	if result.HasPrivacyInfo {
-		green.Fprint(os.Stdout, "  ✓ ")
-		fmt.Println("PrivacyInfo.xcprivacy found")
+		green.Fprint(w, "  ✓ ")
+		fmt.Fprintln(w, "PrivacyInfo.xcprivacy found")
 	} else {
-		red.Fprint(os.Stdout, "  ✗ ")
-		fmt.Println("PrivacyInfo.xcprivacy NOT found")
+		red.Fprint(w, "  ✗ ")
+		fmt.Fprintln(w, "PrivacyInfo.xcprivacy NOT found")
 	}
 
 	if len(result.DetectedAPIs) > 0 {
-		fmt.Printf("  Required Reason APIs detected: %s\n", strings.Join(result.DetectedAPIs, ", "))
+		fmt.Fprintf(w, "  Required Reason APIs detected: %s\n", strings.Join(result.DetectedAPIs, ", "))
 	}
 
 	if len(result.DeclaredAPIs) > 0 {
-		fmt.Printf("  APIs declared in manifest:     %s\n", strings.Join(result.DeclaredAPIs, ", "))
+		fmt.Fprintf(w, "  APIs declared in manifest:     %s\n", strings.Join(result.DeclaredAPIs, ", "))
 	}
 
 	if len(result.TrackingSDKs) > 0 {
-		yellow.Fprint(os.Stdout, "  Tracking SDKs found: ")
-		fmt.Println(strings.Join(result.TrackingSDKs, ", "))
+		yellow.Fprint(w, "  Tracking SDKs found: ")
+		fmt.Fprintln(w, strings.Join(result.TrackingSDKs, ", "))
 	}
 
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	if len(result.Findings) == 0 {
-		green.Fprintln(os.Stdout, "  No privacy issues found!")
-		fmt.Println()
-		printPrivacyFooter(0, 0, 0, elapsed)
+		green.Fprintln(w, "  No privacy issues found!")
+		fmt.Fprintln(w)
+		printPrivacyFooter(w, 0, 0, 0, elapsed)
 		return nil
 	}
 
@@ -110,100 +141,114 @@ func runPrivacy(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(criticals) > 0 {
-		red.Println("  CRITICAL — Will be rejected")
-		fmt.Println()
+		red.Fprintln(w, "  CRITICAL — Will be rejected")
+		fmt.Fprintln(w)
 		for _, f := range criticals {
-			red.Fprint(os.Stdout, "  [CRITICAL] ")
+			red.Fprint(w, "  [CRITICAL] ")
 			if f.Guideline != "" {
-				bold.Fprintf(os.Stdout, "§%s ", f.Guideline)
+				bold.Fprintf(w, "§%s ", f.Guideline)
 			}
-			bold.Fprintln(os.Stdout, f.Title)
-			fmt.Printf("             %s\n", f.Detail)
+			bold.Fprintln(w, f.Title)
+			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.Fix != "" {
-				green.Fprint(os.Stdout, "             Fix: ")
-				fmt.Println(f.Fix)
+				green.Fprint(w, "             Fix: ")
+				fmt.Fprintln(w, f.Fix)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 
 	if len(warns) > 0 {
-		yellow.Println("  WARNING — High rejection risk")
-		fmt.Println()
+		yellow.Fprintln(w, "  WARNING — High rejection risk")
+		fmt.Fprintln(w)
 		for _, f := range warns {
-			yellow.Fprint(os.Stdout, "  [WARN]     ")
+			yellow.Fprint(w, "  [WARN]     ")
 			if f.Guideline != "" {
-				bold.Fprintf(os.Stdout, "§%s ", f.Guideline)
+				bold.Fprintf(w, "§%s ", f.Guideline)
 			}
-			bold.Fprintln(os.Stdout, f.Title)
-			fmt.Printf("             %s\n", f.Detail)
+			bold.Fprintln(w, f.Title)
+			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.Fix != "" {
-				green.Fprint(os.Stdout, "             Fix: ")
-				fmt.Println(f.Fix)
+				green.Fprint(w, "             Fix: ")
+				fmt.Fprintln(w, f.Fix)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 
 	if len(infos) > 0 {
-		dim.Println("  INFO — Best practices")
-		fmt.Println()
+		dim.Fprintln(w, "  INFO — Best practices")
+		fmt.Fprintln(w)
 		for _, f := range infos {
-			dim.Fprint(os.Stdout, "  [INFO]     ")
-			bold.Fprintln(os.Stdout, f.Title)
-			fmt.Printf("             %s\n", f.Detail)
+			dim.Fprint(w, "  [INFO]     ")
+			bold.Fprintln(w, f.Title)
+			fmt.Fprintf(w, "             %s\n", f.Detail)
 			if f.Fix != "" {
-				green.Fprint(os.Stdout, "             Fix: ")
-				fmt.Println(f.Fix)
+				green.Fprint(w, "             Fix: ")
+				fmt.Fprintln(w, f.Fix)
 			}
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
 	}
 
-	printPrivacyFooter(len(criticals), len(warns), len(infos), elapsed)
+	printPrivacyFooter(w, len(criticals), len(warns), len(infos), elapsed)
 	return nil
 }
 
-func printPrivacyFooter(criticals, warns, infos int, elapsed time.Duration) {
+func writePrivacyJSON(w *os.File, result *privacy.ScanResult, elapsed time.Duration) error {
+	output := struct {
+		privacy.ScanResult
+		Elapsed string `json:"elapsed"`
+	}{
+		ScanResult: *result,
+		Elapsed:    elapsed.Round(time.Millisecond).String(),
+	}
+
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	return enc.Encode(output)
+}
+
+func printPrivacyFooter(w *os.File, criticals, warns, infos int, elapsed time.Duration) {
 	red := color.New(color.FgRed, color.Bold)
 	green := color.New(color.FgGreen, color.Bold)
 	total := criticals + warns + infos
 
-	dim.Fprintln(os.Stdout, "  ─────────────────────────────────────────────")
-	fmt.Println()
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprintln(w)
 
 	if criticals == 0 {
-		green.Fprint(os.Stdout, "  GREENLIT")
-		fmt.Fprint(os.Stdout, " — privacy compliance looks good")
+		green.Fprint(w, "  GREENLIT")
+		fmt.Fprint(w, " — privacy compliance looks good")
 	} else {
-		red.Fprint(os.Stdout, "  NOT READY")
-		fmt.Fprintf(os.Stdout, " — %d critical privacy issue(s)", criticals)
+		red.Fprint(w, "  NOT READY")
+		fmt.Fprintf(w, " — %d critical privacy issue(s)", criticals)
 	}
-	fmt.Println()
+	fmt.Fprintln(w)
 
 	if total > 0 {
-		fmt.Fprintf(os.Stdout, "  %d findings: ", total)
+		fmt.Fprintf(w, "  %d findings: ", total)
 		if criticals > 0 {
-			red.Fprintf(os.Stdout, "%d critical  ", criticals)
+			red.Fprintf(w, "%d critical  ", criticals)
 		}
 		if warns > 0 {
-			color.New(color.FgYellow).Fprintf(os.Stdout, "%d warn  ", warns)
+			color.New(color.FgYellow).Fprintf(w, "%d warn  ", warns)
 		}
 		if infos > 0 {
-			dim.Fprintf(os.Stdout, "%d info", infos)
+			dim.Fprintf(w, "%d info", infos)
 		}
-		fmt.Println()
+		fmt.Fprintln(w)
 	}
 
-	dim.Fprintf(os.Stdout, "  completed in %s\n", elapsed.Round(time.Millisecond))
+	dim.Fprintf(w, "  completed in %s\n", elapsed.Round(time.Millisecond))
 
-	fmt.Println()
-	dim.Fprintln(os.Stdout, "  ─────────────────────────────────────────────")
-	fmt.Fprint(os.Stdout, "  Built by ")
-	purple.Fprint(os.Stdout, "Revyl")
-	fmt.Fprintln(os.Stdout, " — the mobile reliability platform")
-	dim.Fprintln(os.Stdout, "  Catch more than rejections. Catch bugs.")
-	fmt.Fprint(os.Stdout, "  ")
-	color.New(color.Underline).Fprintln(os.Stdout, "https://revyl.com")
-	fmt.Println()
+	fmt.Fprintln(w)
+	dim.Fprintln(w, "  ─────────────────────────────────────────────")
+	fmt.Fprint(w, "  Built by ")
+	purple.Fprint(w, "Revyl")
+	fmt.Fprintln(w, " — the mobile reliability platform")
+	dim.Fprintln(w, "  Catch more than rejections. Catch bugs.")
+	fmt.Fprint(w, "  ")
+	color.New(color.Underline).Fprintln(w, "https://revyl.com")
+	fmt.Fprintln(w)
 }
