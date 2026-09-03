@@ -185,6 +185,8 @@ On scope: a source scan reads the `AndroidManifest.xml` and Gradle files in your
 
 ```bash
 greenlight privacy /path/to/project
+greenlight privacy /path/to/project --format json                # JSON for CI
+greenlight privacy /path/to/project --format json --output report.json
 ```
 
 Checks that PrivacyInfo.xcprivacy exists and is filled in, finds Required Reason APIs used in code and compares them against what the manifest declares, and cross-references detected tracking SDKs against your ATT implementation.
@@ -193,6 +195,8 @@ Checks that PrivacyInfo.xcprivacy exists and is filled in, finds Required Reason
 
 ```bash
 greenlight ipa /path/to/build.ipa
+greenlight ipa /path/to/build.ipa --format json                # JSON for CI
+greenlight ipa /path/to/build.ipa --format json --output report.json
 ```
 
 Plists are parsed for real, binary and XML both, rather than string-matched. Inspects:
