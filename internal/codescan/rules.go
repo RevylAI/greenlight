@@ -32,7 +32,7 @@ func AllRules() []Rule {
 			severity:  SeverityCritical,
 			detail:    "Hardcoded secrets in source code is a security vulnerability and review risk.",
 			fix:       "Move secrets to environment variables or a secure keychain.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(sk_live_|sk_test_|pk_live_|pk_test_)[a-zA-Z0-9]{20,}`),
 				regexp.MustCompile(`(?i)(api[_-]?key|api[_-]?secret|secret[_-]?key)\s*[:=]\s*["'][a-zA-Z0-9]{20,}["']`),
@@ -47,7 +47,7 @@ func AllRules() []Rule {
 			severity:  SeverityCritical,
 			detail:    "Using Stripe/PayPal/external payments for digital goods violates IAP requirements. Physical goods are OK.",
 			fix:       "Use StoreKit/IAP for digital goods. External payment is only allowed for physical goods and services.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)stripe.*payment.*intent`),
 				regexp.MustCompile(`(?i)paypal.*checkout`),
@@ -62,7 +62,7 @@ func AllRules() []Rule {
 			severity:  SeverityCritical,
 			detail:    "On-device cryptocurrency mining is explicitly prohibited.",
 			fix:       "Remove all mining functionality.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(crypto|coin)\s*miner`),
 				regexp.MustCompile(`(?i)hash\s*rate`),
@@ -93,14 +93,23 @@ func AllRules() []Rule {
 			severity:  SeverityHigh,
 			detail:    "Using advertising or tracking SDKs requires App Tracking Transparency.",
 			fix:       "Implement ATT prompt before any tracking. Add NSUserTrackingUsageDescription to Info.plist.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(firebase.*analytics|google.*analytics|facebook.*sdk|fbsdk|adjust.*sdk|appsflyer|mixpanel)`),
 				regexp.MustCompile(`(?i)(import\s+Amplitude|AmplitudeSwift|amplitude\.init|Amplitude\.instance|amplitude-js|@amplitude/)`),
 				regexp.MustCompile(`(?i)(import.*@segment/|analytics-react-native|SegmentAnalytics|createClient.*writeKey)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency)`),
+				// ATTrackingStatusBinding is Unity's iOS-14 advertising-support ATT
+				// binding — calling it is the prompt.
+				//
+				// NSUserTrackingUsageDescription is deliberately NOT here. The key only
+				// proves a purpose string exists; it says nothing about whether
+				// requestTrackingAuthorization is ever called. Shipping the string
+				// without ever prompting is the single most common ATT rejection, so
+				// treating the key as proof silences 5.1.2 on exactly the apps that
+				// fail it.
+				regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency|ATTrackingStatusBinding)`),
 			},
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
@@ -112,12 +121,31 @@ func AllRules() []Rule {
 			severity:  SeverityHigh,
 			detail:    "Apps with third-party login (Google, Facebook, etc.) must also offer Sign in with Apple.",
 			fix:       "Add Sign in with Apple as a login option alongside other social logins.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(google.*sign.*in|GIDSignIn|GoogleSignin|facebook.*login|FBSDKLoginManager|LoginManager\.logIn)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication)`),
+				// Auth SDKs abstract SIWA behind provider constants like
+				// APPLE_SIGNIN_RESULT_*, never naming ASAuthorization* directly.
+				// The trailing [^gG] keeps "apple ... signing" (code signing, which
+				// appears in every iOS build script) from passing as sign-IN.
+				//
+				// `apple.*auth` used to be here. `.*` spans the whole line, so any line
+				// mentioning Apple that also contains "auth" anywhere — a docs URL, an
+				// unrelated authToken next to an appleId — disabled 4.8 for the whole
+				// project. Bounded to one identifier's worth of characters.
+				regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple[a-z0-9_.-]*auth|appleAuth|expo-apple-authentication|apple[_\s-]*sign[_\s-]?in([^gG]|$)|sign[_\s-]?in[_\s-]?with[_\s-]?apple)`),
+			},
+			antiIgnorePatterns: []*regexp.Regexp{
+				// "Sign in with Apple coming soon!" is the opposite of evidence, and so
+				// is `appleSignIn: false`. Both used to satisfy the anti-pattern and
+				// turn a HIGH 4.8 into silence.
+				// Word-anchored: an unanchored `WIP` also matches "swipe".
+				regexp.MustCompile(`(?i)(coming soon|not (yet )?(supported|implemented|available|enabled)|\b(unsupported|unimplemented|planned|roadmap|TODO|FIXME|WIP)\b|no(t)? longer)`),
+				regexp.MustCompile(`(?i)apple[a-z0-9_.-]*sign[_\s-]?in[a-z0-9_]*\s*[:=]+\s*(false|0|null|nil|no|off|disabled)\b`),
+				// A documentation link is a reference, not an implementation.
+				regexp.MustCompile(`(?i)https?://[^\s"'` + "`" + `]*apple`),
 			},
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
@@ -129,12 +157,19 @@ func AllRules() []Rule {
 			severity:  SeverityHigh,
 			detail:    "Apps with IAP must include a 'Restore Purchases' button.",
 			fix:       "Add a 'Restore Purchases' button that calls restoreCompletedTransactions or equivalent.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(SKPaymentQueue|StoreKit|Product\.purchase|purchaseProduct|expo-in-app-purchases|react-native-iap|RevenueCat)`),
+				// Unity IAP: UnityEngine.Purchasing namespace, its store listener
+				// interfaces, and the codeless IAP path.
+				regexp.MustCompile(`(?i)(UnityEngine\.Purchasing|UnityPurchasing\.|IStoreListener|IDetailedStoreListener|CodelessIAPStoreListener)`),
 			},
 			antiPatterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases)`),
+				// RestoreTransactions is Unity IAP's restore call. Matching the
+				// IAppleExtensions interface itself would be wrong — it also carries
+				// deferred purchases, receipts and promo helpers, so an app that only
+				// reads a receipt would look like it implements restore.
+				regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases|RestoreTransactions)`),
 			},
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
@@ -146,9 +181,18 @@ func AllRules() []Rule {
 			severity:  SeverityHigh,
 			detail:    "Apps that allow account creation must also offer account deletion functionality.",
 			fix:       "Add an account deletion option in settings. Must actually delete data, not just deactivate.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)(createAccount|signUp|register.*user|create.*account|auth\(\)\.createUser)`),
+				// `register[A-Za-z_]*user` keeps registerDefaults:@{@"UserAgent"...} —
+				// UIKit's user-agent override, which used to flag every app with a
+				// customized webview as having signup — out, because the gap holds
+				// punctuation, not identifier characters.
+				//
+				// A trailing \b was the earlier fix and cut too deep: it drops every
+				// camelCase signup identifier, since `user` is followed by a word
+				// character in RegisterUserAsync, registerUserWithEmail and most of the
+				// C# shapes this scanner was extended to read.
+				regexp.MustCompile(`(?i)(createAccount|signUp|register[a-z_]*user|create.*account|auth\(\)\.createUser)`),
 			},
 			antiPatterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet|close.*account|closeAccount|cancel.*account|delete.*my.*account|erase.*account)`),
@@ -165,7 +209,7 @@ func AllRules() []Rule {
 			severity:  SeverityWarn,
 			detail:    "Mentioning other platforms (Android, Google Play, etc.) in user-facing strings may cause rejection.",
 			fix:       "Remove references to competing platforms from all user-visible text.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				// Only flag the keyword inside a string/JSX literal — user-facing
 				// copy is the §2.3 risk. A bare unquoted match flagged every React
@@ -179,6 +223,10 @@ func AllRules() []Rule {
 				// not user-facing copy: RN platform branches, imports/requires,
 				// package names, file paths, and build config.
 				regexp.MustCompile(`(?i)(Platform\.|import |require\(|from\s+['"][\w@./-]+['"]|@react-native|androidx|\.android\b|/android/|BuildConfig|\.gradle)`),
+				// Unity platform branches and build pipeline idioms — RuntimePlatform
+				// checks, BuildTarget switches, and UNITY_ANDROID defines all carry
+				// the word "Android" without ever reaching user-facing copy.
+				regexp.MustCompile(`(?i)(RuntimePlatform\.|BuildTarget\.|UNITY_ANDROID|UNITY_IOS|Application\.platform|PlayerSettings\.)`),
 			},
 		},
 		&PatternRule{
@@ -188,7 +236,7 @@ func AllRules() []Rule {
 			severity:  SeverityWarn,
 			detail:    "Placeholder text will cause rejection under App Completeness guidelines.",
 			fix:       "Replace all placeholder text with final content.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)"[^"]*\b(lorem ipsum|coming soon|under construction|todo|tbd)\b[^"]*"`),
 				regexp.MustCompile(`(?i)'[^']*\b(lorem ipsum|coming soon|under construction|todo|tbd)\b[^']*'`),
@@ -219,7 +267,7 @@ func AllRules() []Rule {
 			severity:  SeverityWarn,
 			detail:    "Apps must support IPv6. Hardcoded IPv4 addresses will fail on IPv6-only networks.",
 			fix:       "Use hostnames instead of IP addresses. Ensure all networking supports IPv6.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				// Require valid 0-255 octets so version/build strings like
 				// "2020.10.5.1" or "999.1.2.3" aren't mistaken for an IPv4 address.
@@ -236,7 +284,7 @@ func AllRules() []Rule {
 			severity:  SeverityWarn,
 			detail:    "App Transport Security requires HTTPS. HTTP URLs will be blocked by default.",
 			fix:       "Use HTTPS for all network requests.",
-			languages: []string{"swift", "objc", "typescript", "javascript"},
+			languages: []string{"swift", "objc", "typescript", "javascript", "csharp"},
 			patterns: []*regexp.Regexp{
 				regexp.MustCompile(`"http://[^"]+"`),
 				regexp.MustCompile(`'http://[^']+'`),
@@ -275,6 +323,14 @@ func AllRules() []Rule {
 				regexp.MustCompile(`[:\[]\s*UIWebView\b`), // : UIWebView  /  [UIWebView
 			},
 			codeOnly: true,
+			deadCodeGuards: []*regexp.Regexp{
+				// Legacy compatibility shims (e.g. unity-webview's
+				// WebViewWithUIWebView.mm) put their UIWebView path behind a
+				// deployment-target guard. No modern app targets below iOS 9-12, so
+				// that branch never compiles in and cannot trip ITMS-90809 — but only
+				// that branch: usage after the #endif still ships, and still fails.
+				regexp.MustCompile(`__IPHONE_OS_VERSION_MIN_REQUIRED\s*<\s*__IPHONE_(7_0|8_0|9_0|10_0|11_0|12_0)\b`),
+			},
 		},
 		&PatternRule{
 			id:        "vague-purpose-string",
@@ -320,11 +376,19 @@ type PatternRule struct {
 	languages          []string
 	patterns           []*regexp.Regexp
 	antiPatterns       []*regexp.Regexp // If found anywhere in project, suppress this rule
+	antiIgnorePatterns []*regexp.Regexp // Lines matching these can never serve as anti-pattern evidence
 	antiPatternsGlobal bool             // Check anti-patterns across all files, not just current
 	ignorePatterns     []*regexp.Regexp // Lines matching these are skipped
 	countThreshold     int              // Only report if count exceeds this
 	firstMatchOnly     bool             // Project-level fact: cap to one per file; scanner collapses to one per project
 	codeOnly           bool             // Strip string literals + comments before matching (for rules that must not fire on text)
+
+	// deadCodeGuards identify preprocessor conditions whose branch never reaches
+	// a shipping build (e.g. deployment targets nobody supports anymore). Matches
+	// inside such a branch are skipped; matches after the matching #endif are
+	// not. Line-scope ignorePatterns can't express this — the guard and the match
+	// sit on different lines.
+	deadCodeGuards []*regexp.Regexp
 }
 
 func (r *PatternRule) RuleID() string { return r.id }
@@ -334,11 +398,37 @@ func (r *PatternRule) HasGlobalAntiPatterns() bool {
 }
 
 func (r *PatternRule) AntiPatternMatched(fc FileContext) bool {
-	for _, line := range fc.Lines {
+	// An anti-pattern asserts the feature IS implemented, and a comment is never
+	// evidence of that — `// TODO: Sign in with Apple not supported yet` says the
+	// opposite, yet would otherwise suppress the rule project-wide. Stripping runs
+	// over the whole file so a /* … */ block spanning lines is fully removed;
+	// line-local stripping would leave its continuation lines exposed.
+	//
+	// String literals stay: SDK-driven implementations name their providers in
+	// strings (e.g. an "APPLE_SIGNIN_RESULT_CANCELED" error-code constant).
+	//
+	// antiIgnorePatterns then drop lines that mention the feature in order to deny
+	// it — "coming soon", `appleSignIn: false`, a docs URL. Dropping a line that
+	// might have been real evidence costs at most one false positive; accepting a
+	// denial as proof silences the rule everywhere, which is the expensive
+	// direction for a submission gate.
+	for _, code := range stripCommentsMultiline(fc.Lines) {
+		if matchesAny(r.antiIgnorePatterns, code) {
+			continue
+		}
 		for _, ap := range r.antiPatterns {
-			if ap.MatchString(line) {
+			if ap.MatchString(code) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func matchesAny(patterns []*regexp.Regexp, s string) bool {
+	for _, p := range patterns {
+		if p.MatchString(s) {
+			return true
 		}
 	}
 	return false
@@ -356,7 +446,16 @@ func (r *PatternRule) Applies(fc FileContext) bool {
 func (r *PatternRule) Check(fc FileContext) []Finding {
 	var findings []Finding
 
+	var dead map[int]bool
+	if len(r.deadCodeGuards) > 0 {
+		dead = deadLines(fc.Lines, r.deadCodeGuards)
+	}
+
 	for lineNum, line := range fc.Lines {
+		if dead[lineNum] {
+			continue
+		}
+
 		// Skip comment lines
 		trimmed := strings.TrimSpace(line)
 		if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
@@ -418,43 +517,105 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 	return findings
 }
 
-// stripStringsAndComments blanks out the contents of "..."/'...' string literals
-// and removes // line comments and /* */ block comments, so codeOnly rules match
-// only real code. It's a lightweight scan (no escaped-quote handling), which is
-// enough to keep call-shaped text like "UIWebView()" out of the match.
-func stripStringsAndComments(line string) string {
+// stripLine walks one line of C-family source, blanking comments and — when
+// blankStrings is set — string literal contents too. inBlock carries /* … */
+// state in and out so a caller can run it across a whole file.
+//
+// Escapes must be tracked, not skipped over: a `\"` inside a literal ends the
+// string early for a naive scanner, which then reads the rest of the line as
+// being *inside* a string and leaves a trailing `// …` comment intact. That
+// comment can then satisfy an anti-pattern and switch a rule off project-wide —
+// `string s = "quote: \" end"; // TODO: implement Sign in with Apple` did
+// exactly that to Guideline 4.8. `char q = '\'';` is the same bug.
+//
+// C# verbatim strings (@"C:\path") are the mirror case: there `\` is an ordinary
+// character and `""` is the escaped quote, so applying C escape rules would run
+// the string state off the end of the line.
+func stripLine(line string, blankStrings bool, inBlock *bool) string {
 	var b strings.Builder
 	b.Grow(len(line))
-	inStr := false
+
+	put := func(c byte, inStr bool) {
+		if inStr && blankStrings {
+			b.WriteByte(' ')
+			return
+		}
+		b.WriteByte(c)
+	}
+
+	inStr, verbatim := false, false
 	var quote byte
+
 	for i := 0; i < len(line); i++ {
 		c := line[i]
-		if inStr {
+		switch {
+		case *inBlock:
+			if c == '*' && i+1 < len(line) && line[i+1] == '/' {
+				*inBlock = false
+				i++
+			}
 			b.WriteByte(' ')
+		case inStr && verbatim:
+			// "" is an escaped quote; a lone " closes the literal.
+			if c == quote {
+				if i+1 < len(line) && line[i+1] == quote {
+					put(c, true)
+					put(line[i+1], true)
+					i++
+					continue
+				}
+				inStr, verbatim = false, false
+			}
+			put(c, inStr || c == quote)
+		case inStr:
+			if c == '\\' && i+1 < len(line) {
+				put(c, true)
+				put(line[i+1], true)
+				i++
+				continue
+			}
 			if c == quote {
 				inStr = false
 			}
-			continue
-		}
-		switch {
+			put(c, inStr || c == quote)
 		case c == '"' || c == '\'' || c == '`':
 			inStr = true
 			quote = c
-			b.WriteByte(' ')
+			// @"…" (C#) and its interpolated form $@"…" are verbatim.
+			verbatim = c == '"' && i > 0 && line[i-1] == '@'
+			put(c, true)
 		case c == '/' && i+1 < len(line) && line[i+1] == '/':
 			return b.String() // rest of the line is a comment
 		case c == '/' && i+1 < len(line) && line[i+1] == '*':
-			end := strings.Index(line[i+2:], "*/")
-			if end < 0 {
-				return b.String() // unterminated block comment
-			}
-			i += end + 3 // skip past the closing */
+			*inBlock = true
+			i++
 			b.WriteByte(' ')
 		default:
 			b.WriteByte(c)
 		}
 	}
 	return b.String()
+}
+
+// stripCommentsMultiline blanks comments across a file while preserving string
+// literals, carrying /* … */ state between lines so a block comment's
+// continuation lines are stripped too. It is string-aware, so a `//` inside a
+// literal (e.g. "https://example.com") is not mistaken for a comment.
+func stripCommentsMultiline(lines []string) []string {
+	out := make([]string, len(lines))
+	inBlock := false
+	for i, line := range lines {
+		out[i] = stripLine(line, false, &inBlock)
+	}
+	return out
+}
+
+// stripStringsAndComments blanks out the contents of "..."/'...' string literals
+// and removes // line comments and /* */ block comments, so codeOnly rules match
+// only real code — call-shaped text like "UIWebView()" stays out of the match.
+func stripStringsAndComments(line string) string {
+	inBlock := false
+	return stripLine(line, true, &inBlock)
 }
 
 // suppressedByIgnore reports whether the matching line, or the line directly
