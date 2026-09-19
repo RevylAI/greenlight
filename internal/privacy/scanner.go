@@ -107,7 +107,7 @@ var trackingSDKPatterns = []struct {
 	{regexp.MustCompile(`(?i)(mixpanel)`), "Mixpanel"},
 	{regexp.MustCompile(`(?i)(@segment/|analytics-react-native)`), "Segment"},
 	{regexp.MustCompile(`(?i)(branch\.io|react-native-branch)`), "Branch"},
-	{regexp.MustCompile(`(?i)(google.*ads|GADMobileAds|admob)`), "Google Ads/AdMob"},
+	{regexp.MustCompile(`(?i)(googlemobileads|google-mobile-ads|GADMobileAds|GADApplicationIdentifier|\badmob)`), "Google Ads/AdMob"},
 	{regexp.MustCompile(`(?i)(unity.*ads|UnityAds)`), "Unity Ads"},
 	{regexp.MustCompile(`(?i)(applovin|AppLovinSDK)`), "AppLovin"},
 	{regexp.MustCompile(`(?i)(ironSource|IronSource)`), "ironSource"},
