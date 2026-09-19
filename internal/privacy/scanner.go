@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -93,6 +94,9 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 	},
 }
 
+// attPattern matches an App Tracking Transparency implementation.
+var attPattern = regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency)`)
+
 // Known tracking/advertising SDKs
 var trackingSDKPatterns = []struct {
 	Pattern *regexp.Regexp
@@ -138,6 +142,7 @@ func Scan(projectPath string) (*ScanResult, error) {
 	// 2. Scan code for Required Reason API usage
 	detectedAPIs := make(map[string][]FileHit)
 	trackingSDKsFound := make(map[string]bool)
+	trackingSDKHits := make(map[string]FileHit)
 	hasATT := false
 
 	skipDirs := map[string]bool{
@@ -165,17 +170,32 @@ func Scan(projectPath string) (*ScanResult, error) {
 			return nil
 		}
 
-		fullContent := strings.Join(lines, "\n")
+		// Tracking SDKs and the ATT call are matched line by line, skipping comments.
+		// A commented-out reference is not an integration: counting one as a tracking
+		// SDK produces a CRITICAL for an app that does not track, and counting one as
+		// an ATT implementation hides a real CRITICAL from an app that does.
+		for lineNum, line := range lines {
+			if isCommentLine(line) {
+				continue
+			}
 
-		// Check for ATT implementation
-		if regexp.MustCompile(`(?i)(ATTrackingManager|requestTrackingAuthorization|AppTrackingTransparency|expo-tracking-transparency)`).MatchString(fullContent) {
-			hasATT = true
-		}
+			if attPattern.MatchString(line) {
+				hasATT = true
+			}
 
-		// Check for tracking SDKs
-		for _, sdk := range trackingSDKPatterns {
-			if sdk.Pattern.MatchString(fullContent) {
+			for _, sdk := range trackingSDKPatterns {
+				if !sdk.Pattern.MatchString(line) {
+					continue
+				}
 				trackingSDKsFound[sdk.Name] = true
+				if _, seen := trackingSDKHits[sdk.Name]; !seen {
+					trackingSDKHits[sdk.Name] = FileHit{
+						File: relPath,
+						Line: lineNum + 1,
+						Code: strings.TrimSpace(line),
+						API:  sdk.Name,
+					}
+				}
 			}
 		}
 
@@ -185,8 +205,7 @@ func Scan(projectPath string) (*ScanResult, error) {
 				continue
 			}
 			for lineNum, line := range lines {
-				trimmed := strings.TrimSpace(line)
-				if strings.HasPrefix(trimmed, "//") || strings.HasPrefix(trimmed, "/*") || strings.HasPrefix(trimmed, "*") {
+				if isCommentLine(line) {
 					continue
 				}
 				for _, p := range api.Patterns {
@@ -242,16 +261,26 @@ func Scan(projectPath string) (*ScanResult, error) {
 	for sdk := range trackingSDKsFound {
 		result.TrackingSDKs = append(result.TrackingSDKs, sdk)
 	}
+	// Map iteration is randomised, so sort for a stable report.
+	sort.Strings(result.TrackingSDKs)
 
 	if len(trackingSDKsFound) > 0 && !hasATT {
 		sdkList := strings.Join(result.TrackingSDKs, ", ")
-		result.Findings = append(result.Findings, Finding{
+		finding := Finding{
 			Severity:  "CRITICAL",
 			Guideline: "5.1.2",
 			Title:     "Tracking SDKs detected without ATT implementation",
 			Detail:    "Found: " + sdkList + ". App Tracking Transparency prompt is required before any tracking.",
 			Fix:       "Import AppTrackingTransparency and call requestTrackingAuthorization() before initializing any tracking SDK.",
-		})
+		}
+		// Cite where the first SDK was matched, so the finding can be checked
+		// against the source the way the Required Reason findings already can be.
+		if hit, ok := earliestHit(trackingSDKHits); ok {
+			finding.File = hit.File
+			finding.Line = hit.Line
+			finding.Detail += " First seen at " + hit.File + ":" + fmt.Sprint(hit.Line) + "."
+		}
+		result.Findings = append(result.Findings, finding)
 	}
 
 	// 5. Check if privacy manifest declares tracking but no tracking SDKs found
@@ -333,6 +362,31 @@ func parsePrivacyManifest(content string) []string {
 		apis = append(apis, m)
 	}
 	return apis
+}
+
+// earliestHit returns the hit that comes first in the project, ordered by file
+// then line. Ranging over the map directly would pick an arbitrary SDK, so the
+// cited location — and "first seen" — would change between runs.
+func earliestHit(hits map[string]FileHit) (FileHit, bool) {
+	var earliest FileHit
+	found := false
+	for _, hit := range hits {
+		if !found || hit.File < earliest.File || (hit.File == earliest.File && hit.Line < earliest.Line) {
+			earliest = hit
+			found = true
+		}
+	}
+	return earliest, found
+}
+
+// isCommentLine reports whether a source line is a single-line or block comment.
+// It is deliberately conservative: it only skips lines that begin with a comment
+// marker, so a trailing comment on a line of real code is still scanned.
+func isCommentLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "//") ||
+		strings.HasPrefix(trimmed, "/*") ||
+		strings.HasPrefix(trimmed, "*")
 }
 
 func detectLang(path string) string {
