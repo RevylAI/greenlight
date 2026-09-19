@@ -98,19 +98,19 @@ var trackingSDKPatterns = []struct {
 	Pattern *regexp.Regexp
 	Name    string
 }{
-	{regexp.MustCompile(`(?i)firebase.*analytics`), "Firebase Analytics"},
-	{regexp.MustCompile(`(?i)google.*analytics`), "Google Analytics"},
-	{regexp.MustCompile(`(?i)(fbsdk|facebook.*sdk)`), "Facebook SDK"},
-	{regexp.MustCompile(`(?i)adjust.*sdk`), "Adjust SDK"},
+	{regexp.MustCompile(`(?i)(firebaseanalytics|firebase[-/.](?:compat/)?analytics)`), "Firebase Analytics"},
+	{regexp.MustCompile(`(?i)(googleanalytics|google-analytics)`), "Google Analytics"},
+	{regexp.MustCompile(`(?i)(fbsdk|facebook-?(?:ios-|android-|js)?sdk)`), "Facebook SDK"},
+	{regexp.MustCompile(`(?i)(adjust[-_]?sdk|react-native-adjust|com\.adjust\b|Adjust\.(appDidLaunch|trackEvent|initSdk|getAdid))`), "Adjust SDK"},
 	{regexp.MustCompile(`(?i)appsflyer`), "AppsFlyer"},
 	{regexp.MustCompile(`(?i)(import\s+Amplitude|AmplitudeSwift|amplitude\.init|Amplitude\.instance|amplitude-js|@amplitude/)`), "Amplitude"},
 	{regexp.MustCompile(`(?i)(mixpanel)`), "Mixpanel"},
 	{regexp.MustCompile(`(?i)(@segment/|analytics-react-native)`), "Segment"},
 	{regexp.MustCompile(`(?i)(branch\.io|react-native-branch)`), "Branch"},
-	{regexp.MustCompile(`(?i)(google.*ads|GADMobileAds|admob)`), "Google Ads/AdMob"},
-	{regexp.MustCompile(`(?i)(unity.*ads|UnityAds)`), "Unity Ads"},
-	{regexp.MustCompile(`(?i)(applovin|AppLovinSDK)`), "AppLovin"},
-	{regexp.MustCompile(`(?i)(ironSource|IronSource)`), "ironSource"},
+	{regexp.MustCompile(`(?i)(googlemobileads|google-mobile-ads|GADMobileAds|GADApplicationIdentifier|\badmob)`), "Google Ads/AdMob"},
+	{regexp.MustCompile(`(?i)(unityads|unity-ads|unity3d\.ads)`), "Unity Ads"},
+	{regexp.MustCompile(`(?i)applovin`), "AppLovin"},
+	{regexp.MustCompile(`(?i)ironsource`), "ironSource"},
 }
 
 // Scan runs the privacy analysis on a project directory.
