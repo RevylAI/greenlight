@@ -69,7 +69,7 @@ greenlight preflight . --exit-code              # non-zero on CRITICAL/HIGH
 | Scanner | Checks |
 |---------|--------|
 | metadata | app.json / Info.plist: name, version, bundle ID format, icon, privacy policy URL, purpose strings |
-| codescan | 24 rules over Swift, Objective-C, React Native, and Expo source |
+| codescan | 25 rules over Swift, Objective-C, React Native, and Expo source |
 | privacy | PrivacyInfo.xcprivacy completeness, Required Reason APIs, tracking SDKs vs ATT |
 | playscan | Google Play policy, target API deadline, restricted permissions, foreground service types, Play Billing version (Android projects only) |
 | ipa | Binary: Info.plist keys, launch storyboard, icons, app size, framework privacy manifests |
@@ -90,7 +90,7 @@ greenlight codescan /path/to/project
 greenlight codescan . --config path/to/.greenlight.yml
 ```
 
-24 rules, roughly 60 patterns, over Swift, Objective-C, React Native, and Expo.
+25 rules, roughly 62 patterns, over Swift, Objective-C, React Native, and Expo.
 
 CRITICAL:
 
@@ -108,6 +108,7 @@ HIGH:
 - Missing ATT with ad or tracking SDKs (§5.1.2)
 - Account creation with no deletion path (§5.1.1)
 - A crypto exchange or on-ramp SDK, which usually needs licensing or a legal opinion (§3.1.5(b))
+- A UGC/chat/social SDK with no reporting, blocking, or moderation anywhere in the project (§1.2)
 
 WARN:
 
@@ -185,6 +186,7 @@ On scope: a source scan reads the `AndroidManifest.xml` and Gradle files in your
 
 ```bash
 greenlight privacy /path/to/project
+greenlight privacy /path/to/project --format json
 ```
 
 Checks that PrivacyInfo.xcprivacy exists and is filled in, finds Required Reason APIs used in code and compares them against what the manifest declares, and cross-references detected tracking SDKs against your ATT implementation.
@@ -379,7 +381,7 @@ Use $app-store-preflight-compliance to run Greenlight preflight and fix all find
 greenlight
 ├── preflight         Run every applicable scanner, one command
 │   ├── metadata      app.json / Info.plist
-│   ├── codescan      24 rejection-risk rules
+│   ├── codescan      25 rejection-risk rules
 │   ├── privacy       Privacy manifest + Required Reason APIs
 │   ├── playscan      Google Play policy (Android projects)
 │   ├── ipa           Binary inspection (with --ipa)
