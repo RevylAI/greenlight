@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 )
+
+var privacyFormat string
 
 var privacyCmd = &cobra.Command{
 	Use:   "privacy [path]",
@@ -27,12 +30,17 @@ Checks:
   • Tracking SDKs detected vs ATT implementation
   • NSPrivacyTracking, NSPrivacyAccessedAPITypes declarations
 
-No App Store Connect account needed — runs entirely offline.`,
+No App Store Connect account needed — runs entirely offline.
+
+Usage:
+  greenlight privacy .
+  greenlight privacy /path/to/project --format json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runPrivacy,
 }
 
 func init() {
+	privacyCmd.Flags().StringVar(&privacyFormat, "format", "terminal", "output format: terminal, json")
 	rootCmd.AddCommand(privacyCmd)
 }
 
@@ -50,8 +58,13 @@ func runPrivacy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("path must be a directory: %s", path)
 	}
 
-	purple.Println("\n  greenlight privacy — validate your privacy compliance.")
-	fmt.Printf("  Scanning: %s\n\n", path)
+	isJSON := strings.ToLower(privacyFormat) == "json"
+
+	// Banner suppressed for --format json so stdout stays valid JSON.
+	if !isJSON {
+		purple.Println("\n  greenlight privacy — validate your privacy compliance.")
+		fmt.Printf("  Scanning: %s\n\n", path)
+	}
 
 	start := time.Now()
 	result, err := privacy.Scan(path)
@@ -59,6 +72,12 @@ func runPrivacy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("privacy scan failed: %w", err)
 	}
 	elapsed := time.Since(start)
+
+	if isJSON {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(result)
+	}
 
 	red := color.New(color.FgRed, color.Bold)
 	yellow := color.New(color.FgYellow)

@@ -9,7 +9,7 @@
 
 Greenlight reads your app (source code, privacy manifests, Android manifests and Gradle builds, IPA binaries, App Store Connect metadata) and checks it against Apple's Review Guidelines and Google Play's Developer Program Policies. Every finding cites the rule it comes from. No account, no uploads, no network. A full preflight on a mid-size project finishes in single-digit milliseconds.
 
-A static scan can only prove a flow *exists*. `greenlight verify` proves it *works*: it runs your account-deletion, restore-purchases, and Sign in with Apple flows on a cloud device and fails the build if any of them dead-ends. That tier is powered by [Revyl](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=intro) and needs a free account. Everything else on this page runs offline. See [`greenlight verify`](#greenlight-verify-path).
+A static scan can only prove a flow *exists*. `greenlight verify` proves it *works*: it runs your account-deletion, restore-purchases, subscription-renewal-disclosure, and Sign in with Apple flows on a cloud device and fails the build if any of them dead-ends. That tier is powered by [Revyl](https://revyl.com?utm_source=greenlight&utm_medium=readme&utm_campaign=intro) and needs a free account. Everything else on this page runs offline. See [`greenlight verify`](#greenlight-verify-path).
 
 ## Install
 
@@ -69,7 +69,7 @@ greenlight preflight . --exit-code              # non-zero on CRITICAL/HIGH
 | Scanner | Checks |
 |---------|--------|
 | metadata | app.json / Info.plist: name, version, bundle ID format, icon, privacy policy URL, purpose strings |
-| codescan | 24 rules over Swift, Objective-C, React Native, and Expo source |
+| codescan | 25 rules over Swift, Objective-C, React Native, and Expo source |
 | privacy | PrivacyInfo.xcprivacy completeness, Required Reason APIs, tracking SDKs vs ATT |
 | playscan | Google Play policy, target API deadline, restricted permissions, foreground service types, Play Billing version (Android projects only) |
 | ipa | Binary: Info.plist keys, launch storyboard, icons, app size, framework privacy manifests |
@@ -90,7 +90,7 @@ greenlight codescan /path/to/project
 greenlight codescan . --config path/to/.greenlight.yml
 ```
 
-24 rules, roughly 60 patterns, over Swift, Objective-C, React Native, and Expo.
+25 rules, roughly 60 patterns, over Swift, Objective-C, React Native, and Expo.
 
 CRITICAL:
 
@@ -105,6 +105,7 @@ HIGH:
 
 - Missing Sign in with Apple alongside social login (§4.8)
 - Missing Restore Purchases with IAP (§3.1.1)
+- Auto-renewable subscription with no renewal disclosure near the purchase button (§3.1.2)
 - Missing ATT with ad or tracking SDKs (§5.1.2)
 - Account creation with no deletion path (§5.1.1)
 - A crypto exchange or on-ramp SDK, which usually needs licensing or a legal opinion (§3.1.5(b))
@@ -185,6 +186,7 @@ On scope: a source scan reads the `AndroidManifest.xml` and Gradle files in your
 
 ```bash
 greenlight privacy /path/to/project
+greenlight privacy /path/to/project --format json
 ```
 
 Checks that PrivacyInfo.xcprivacy exists and is filled in, finds Required Reason APIs used in code and compares them against what the manifest declares, and cross-references detected tracking SDKs against your ATT implementation.
@@ -236,6 +238,7 @@ Only flows your app actually claims are run:
 |------|-----------|----------------------------------------|
 | `account-deletion` | §5.1.1 | The account is gone, not that a `deleteAccount` string exists |
 | `restore-purchases` | §3.1.1 | "Restore Purchases" does something, rather than being a silent no-op |
+| `subscription-renewal-disclosure` | §3.1.2 | The renewal/price/terms disclosure is actually visible on the paywall, not just present somewhere in source |
 | `sign-in-apple` | §4.8 | The Apple sign-in sheet appears, and the control is not dead |
 
 A failed flow becomes a BLOCK that static analysis could never produce, with a shareable Revyl report link as evidence. `--open` follows the live session in your browser while it runs, and `--exit-code` gates CI on it.
@@ -391,9 +394,10 @@ greenlight
 ├── ipa               Binary only
 │
 ├── verify            Runtime flow validation on a cloud device (Revyl)
-│   ├── account-deletion   §5.1.1  the account is actually deleted
-│   ├── restore-purchases  §3.1.1  Restore Purchases isn't a no-op
-│   └── sign-in-apple      §4.8    the Apple sign-in sheet appears
+│   ├── account-deletion              §5.1.1  the account is actually deleted
+│   ├── restore-purchases             §3.1.1  Restore Purchases isn't a no-op
+│   ├── subscription-renewal-disclosure §3.1.2  the renewal disclosure is actually shown
+│   └── sign-in-apple                 §4.8    the Apple sign-in sheet appears
 │
 ├── scan              App Store Connect API checks (tiers 1-4)
 │   ├── Tier 1        Metadata and completeness

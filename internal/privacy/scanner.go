@@ -46,7 +46,16 @@ var requiredReasonAPIs = []RequiredReasonAPI{
 		Patterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)(\.creationDate|\.modificationDate|\.contentModificationDate|fileModificationDate|URLResourceKey\.contentModification)`),
 			regexp.MustCompile(`(?i)(NSFileCreationDate|NSFileModificationDate)`),
-			regexp.MustCompile(`(?i)(\bstat\s*\(|\bfstat\s*\(|\blstat\s*\(|getattrlist)`),
+			// Case-sensitive on purpose: stat()/fstat()/lstat() are lowercase
+			// POSIX C calls. Matching them case-insensitively made this fire
+			// on any TS/JS identifier named like the common React/RN
+			// component convention `function Stat(...)` (and similarly
+			// capitalized helpers), producing a CRITICAL "will be rejected"
+			// Required Reason API finding on apps that never touch a file
+			// timestamp API at all. getattrlist has no such casing collision,
+			// so it stays case-insensitive.
+			regexp.MustCompile(`(\bstat\s*\(|\bfstat\s*\(|\blstat\s*\()`),
+			regexp.MustCompile(`(?i)getattrlist`),
 		},
 		Languages:   []string{"swift", "objc", "typescript", "javascript"},
 		Description: "Accessing file timestamps (creation date, modification date)",
@@ -107,8 +116,13 @@ var trackingSDKPatterns = []struct {
 	{regexp.MustCompile(`(?i)(mixpanel)`), "Mixpanel"},
 	{regexp.MustCompile(`(?i)(@segment/|analytics-react-native)`), "Segment"},
 	{regexp.MustCompile(`(?i)(branch\.io|react-native-branch)`), "Branch"},
-	{regexp.MustCompile(`(?i)(google.*ads|GADMobileAds|admob)`), "Google Ads/AdMob"},
-	{regexp.MustCompile(`(?i)(unity.*ads|UnityAds)`), "Unity Ads"},
+	// Anchored to actual AdMob tokens rather than a bare "google...ads"
+	// substring: that unanchored form matched inside ordinary identifiers
+	// like `loadSdk` (Google Sign-In) or `downloads`/`uploads`/`threads`
+	// whenever "google" appeared earlier on the same line, producing a
+	// CRITICAL ATT finding on apps that ship no ad SDK at all.
+	{regexp.MustCompile(`(?i)(google-mobile-ads|googlemobileads|GADMobileAds|GADApplicationIdentifier|\badmob\b)`), "Google Ads/AdMob"},
+	{regexp.MustCompile(`(?i)(unity-ads|unityads|UnityAds|com\.unity3d\.ads)`), "Unity Ads"},
 	{regexp.MustCompile(`(?i)(applovin|AppLovinSDK)`), "AppLovin"},
 	{regexp.MustCompile(`(?i)(ironSource|IronSource)`), "ironSource"},
 }

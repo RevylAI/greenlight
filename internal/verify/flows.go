@@ -65,6 +65,21 @@ func AllFlows() []Flow {
 			},
 		},
 		{
+			ID:           "subscription-renewal-disclosure",
+			Guideline:    "3.1.2",
+			Title:        "The paywall must actually show the required renewal disclosure",
+			StaticRule:   "subscription-no-renewal-disclosure",
+			AntiPattern:  "auto-renews unless cancelled",
+			claimed:      func(c codescan.Claims) bool { return c.Subscription },
+			staticPassed: func(c codescan.Claims) bool { return c.HasRenewalDisclosure },
+			Steps: []Step{
+				{Type: "instructions", Desc: "Navigate to the paywall or subscription screen"},
+				{Type: "validation", Desc: "The subscription's title, length, and price are visible on screen"},
+				{Type: "validation", Desc: "Text stating the subscription automatically renews unless cancelled is visible near the purchase button, not buried behind a separate tap"},
+				{Type: "validation", Desc: "A Terms of Use (EULA) link and a Privacy Policy link are both visible and tappable on the same screen"},
+			},
+		},
+		{
 			ID:           "sign-in-apple",
 			Guideline:    "4.8",
 			Title:        "Sign in with Apple must actually start Apple sign-in",

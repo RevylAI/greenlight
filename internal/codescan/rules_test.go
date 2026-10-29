@@ -116,6 +116,32 @@ func TestPlatformReferenceIgnoresCodeConstructs(t *testing.T) {
 	}
 }
 
+// §2.3 platform-reference must not match a bare identifier that merely sits
+// between two unrelated string literals. Found by running greenlight against
+// a real React Native app: `FONT_FAMILIES = { serif: { ios: 'Georgia',
+// android: 'serif' } }` tripped a false WARN because the old
+// '[^']*android[^']*'-shaped regex has no notion of which quote opened which
+// string — it matched from 'Georgia”s closing quote to 'serif”s opening
+// quote, "finding" the bare object key android in the gap even though
+// neither literal contains the word.
+func TestPlatformReferenceIgnoresBareIdentifierBetweenLiterals(t *testing.T) {
+	r := ruleByID(t, "platform-reference")
+
+	clean := tsCtx(
+		`  serif: { label: 'Serif', ios: 'Georgia', android: 'serif' },`,
+		`  mono: { label: 'Mono', ios: 'Menlo', android: 'monospace' },`,
+	)
+	if got := r.Check(clean); len(got) != 0 {
+		t.Errorf("expected no findings for a bare 'android' key between unrelated string literals, got %d: %+v", len(got), got)
+	}
+
+	// A real mention inside one of the literals must still be caught.
+	dirty := tsCtx(`  note: { label: 'Note', ios: 'Default', android: 'See the Google Play listing' },`)
+	if got := r.Check(dirty); len(got) != 1 {
+		t.Errorf("expected 1 finding for a real competitor mention inside a literal, got %d: %+v", len(got), got)
+	}
+}
+
 // The flow-dependent guidelines static analysis can only weakly assert (missing
 // account deletion, Sign in with Apple, restore purchases, ATT) are HIGH — likely
 // rejections — not WARN. Mislabeling them WARN let apps that Apple rejects still
