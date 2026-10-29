@@ -320,22 +320,28 @@ func computeSummary(findings []Finding) Summary {
 	return s
 }
 
-// dedup removes findings with the same title, keeping the highest severity.
+// dedup removes findings with the same title that point at the same
+// location, keeping the highest severity. The key includes File/Line so a
+// rule that legitimately fires once per occurrence (e.g. a hardcoded secret
+// in two different files) keeps every real occurrence — only a true
+// cross-scanner duplicate of a project-level fact (same title, no file/line
+// on either side) collapses to one.
 func dedup(findings []Finding) []Finding {
-	seen := make(map[string]int) // title -> index in result
+	seen := make(map[string]int) // title+file+line -> index in result
 	var result []Finding
 
 	sevRank := map[string]int{"CRITICAL": 4, "HIGH": 3, "WARN": 2, "INFO": 1}
 
 	for _, f := range findings {
-		if idx, ok := seen[f.Title]; ok {
+		key := fmt.Sprintf("%s\x00%s\x00%d", f.Title, f.File, f.Line)
+		if idx, ok := seen[key]; ok {
 			// Keep higher severity
 			if sevRank[f.Severity] > sevRank[result[idx].Severity] {
 				result[idx] = f
 			}
 			continue
 		}
-		seen[f.Title] = len(result)
+		seen[key] = len(result)
 		result = append(result, f)
 	}
 	return result

@@ -51,6 +51,19 @@ func runScan(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("not authenticated — run 'greenlight auth setup' first: %w", err)
 	}
 
+	// 'scan' talks to the App Store Connect v1 REST API, which only an API
+	// key (generateToken) can authenticate to. 'auth login' saves an Apple ID
+	// web session instead — real credentials, but the wrong shape for this
+	// client. Without this check, cfg.KeyID/IssuerID/PrivateKeyPath are empty
+	// and asc.NewClient fails deep inside generateToken with a confusing
+	// "failed to read private key: open : no such file or directory".
+	if !cfg.IsValid() {
+		return fmt.Errorf("not authenticated — run 'greenlight auth setup' first")
+	}
+	if cfg.AuthMethod != config.AuthMethodAPIKey {
+		return fmt.Errorf("'scan' needs an App Store Connect API key; the Apple ID session from 'auth login' can't call the v1 API — run 'greenlight auth setup' instead")
+	}
+
 	// Banner
 	purple.Println("\n  greenlight — know before you submit.")
 	fmt.Printf("  App ID:   %s\n", scanAppID)

@@ -156,6 +156,37 @@ func AllRules() []Rule {
 			antiPatternsGlobal: true,
 			firstMatchOnly:     true,
 		},
+		&PatternRule{
+			id:        "kids-external-link-no-parental-gate",
+			title:     "Child-directed app has external links/purchases without a parental gate",
+			guideline: "1.3",
+			severity:  SeverityHigh,
+			detail:    "Apps that declare themselves child-directed must show a parental gate before external links, web views, App Store product pages, or purchase flows.",
+			fix:       "Add a parental gate (e.g. a simple age or math challenge) before any external link, web view, App Store product page, or purchase flow.",
+			languages: []string{"swift", "objc", "typescript", "javascript"},
+			// This rule only even runs for apps that have flagged themselves
+			// child-directed (requireGlobal below) — otherwise every app linking
+			// out to a browser or StoreKit would trip a parental-gate warning it
+			// doesn't need, which is exactly the Kids Category's own scope per
+			// Guideline 1.3.
+			requireGlobal: []*regexp.Regexp{
+				// Covers all three real-world shapes: the iOS/RN property or
+				// object-literal assignment (`tagForChildDirectedTreatment: true` /
+				// `= true`), the Android builder setter
+				// (`setTagForChildDirectedTreatment(true)`), and the legacy AdMob
+				// extras dictionary key (`GADIsChildDirectedTreatmentEnabled`,
+				// which is only ever used to mean "yes" when present at all).
+				regexp.MustCompile(`(?i)(GADIsChildDirectedTreatmentEnabled|(set)?tagForChildDirectedTreatment\s*[:=(]\s*(true|RequestConfiguration\.TAG_FOR_CHILD_DIRECTED_TREATMENT_TRUE)|(set)?tagForUnderAgeOfConsent\s*[:=(]\s*(true|RequestConfiguration\.TAG_FOR_UNDER_AGE_OF_CONSENT_TRUE))`),
+			},
+			patterns: []*regexp.Regexp{
+				regexp.MustCompile(`(?i)(SFSafariViewController|UIApplication\.shared\.open\s*\(|Linking\.openURL|SKStoreProductViewController|SKPaymentQueue|StoreKit\.|react-native-iap|RevenueCat|Purchases\.(configure|purchasePackage))`),
+			},
+			antiPatterns: []*regexp.Regexp{
+				regexp.MustCompile(`(?i)(parental\s*gate|ParentalGate|ask\s*(a|your)\s*parent|are\s*you\s*an\s*adult)`),
+			},
+			antiPatternsGlobal: true,
+			firstMatchOnly:     true,
+		},
 
 		// MEDIUM - May cause issues
 		&PatternRule{
@@ -166,13 +197,20 @@ func AllRules() []Rule {
 			detail:    "Mentioning other platforms (Android, Google Play, etc.) in user-facing strings may cause rejection.",
 			fix:       "Remove references to competing platforms from all user-visible text.",
 			languages: []string{"swift", "objc", "typescript", "javascript"},
-			patterns: []*regexp.Regexp{
-				// Only flag the keyword inside a string/JSX literal — user-facing
-				// copy is the §2.3 risk. A bare unquoted match flagged every React
-				// Native app (Platform.OS checks, imports, package paths).
-				regexp.MustCompile(`(?i)"[^"]*\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b[^"]*"`),
-				regexp.MustCompile(`(?i)'[^']*\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b[^']*'`),
-				regexp.MustCompile("(?i)`[^`]*\\b(android|google\\s*play|play\\s*store|samsung|windows\\s*phone)\\b[^`]*`"),
+			// Only flag the keyword inside a string/JSX literal — user-facing
+			// copy is the §2.3 risk. A bare unquoted match flagged every React
+			// Native app (Platform.OS checks, imports, package paths). This used
+			// to be done with three '[^']*word[^']*'-shaped regexes, but those
+			// have no notion of which quote opened which string: on a line with
+			// two separate literals and a bare identifier between them (e.g.
+			// `ios: 'Georgia', android: 'serif'`), the regex happily spans from
+			// the first literal's closing quote to the second literal's opening
+			// quote and "finds" the keyword in the gap between them, even though
+			// neither literal contains it. literalPatterns instead extracts each
+			// quoted literal's actual content first, so a bare object key named
+			// "android" between two unrelated strings can never match.
+			literalPatterns: []*regexp.Regexp{
+				regexp.MustCompile(`(?i)\b(android|google\s*play|play\s*store|samsung|windows\s*phone)\b`),
 			},
 			ignorePatterns: []*regexp.Regexp{
 				// Code constructs that legitimately contain these keywords but are
@@ -190,10 +228,19 @@ func AllRules() []Rule {
 			fix:       "Replace all placeholder text with final content.",
 			languages: []string{"swift", "objc", "typescript", "javascript"},
 			patterns: []*regexp.Regexp{
-				regexp.MustCompile(`(?i)"[^"]*\b(lorem ipsum|coming soon|under construction|todo|tbd)\b[^"]*"`),
-				regexp.MustCompile(`(?i)'[^']*\b(lorem ipsum|coming soon|under construction|todo|tbd)\b[^']*'`),
-				regexp.MustCompile("(?i)`[^`]*\\b(lorem ipsum|coming soon|under construction|todo|tbd)\\b[^`]*`"),
-				regexp.MustCompile(`(?i)\b(lorem ipsum|coming soon|under construction|todo|tbd)\b`), // bare text (JSX content)
+				// A single bare (unanchored) match against the whole line already
+				// catches the keyword both inside a quoted literal and in bare JSX
+				// text content — matchLine here is the raw line, not stripped of
+				// string contents. The three '[^"]*word[^"]*"'-shaped variants that
+				// used to sit alongside this were not just redundant: they have no
+				// notion of which quote opened which string, so on a line with two
+				// separate literals and a bare identifier between them (e.g.
+				// `a: 'foo', todo: 'bar'`) they span from one literal's closing
+				// quote to the next literal's opening quote and "find" the keyword
+				// in the gap, even though neither literal contains it. Removing
+				// them loses no real detection (the bare pattern already covers
+				// every case they did) while removing that false-positive path.
+				regexp.MustCompile(`(?i)\b(lorem ipsum|coming soon|under construction|todo|tbd)\b`),
 			},
 			ignorePatterns: []*regexp.Regexp{
 				regexp.MustCompile(`(?i)(func\s+placeholder\s*\(|\.placeholder\s*[:=]|placeholder\s*[:=]\s*[A-Z]|placeholder\s*\(in\s*context)`), // Swift/WidgetKit protocol methods and property assignments
@@ -319,8 +366,10 @@ type PatternRule struct {
 	fix                string
 	languages          []string
 	patterns           []*regexp.Regexp
+	literalPatterns    []*regexp.Regexp // Matched against each string literal's own content, not the raw line (see extractStringLiterals)
 	antiPatterns       []*regexp.Regexp // If found anywhere in project, suppress this rule
 	antiPatternsGlobal bool             // Check anti-patterns across all files, not just current
+	requireGlobal      []*regexp.Regexp // If non-empty, this rule only runs when one of these matches anywhere in project (AND-gate; see GlobalPreconditionRule)
 	ignorePatterns     []*regexp.Regexp // Lines matching these are skipped
 	countThreshold     int              // Only report if count exceeds this
 	firstMatchOnly     bool             // Project-level fact: cap to one per file; scanner collapses to one per project
@@ -337,6 +386,21 @@ func (r *PatternRule) AntiPatternMatched(fc FileContext) bool {
 	for _, line := range fc.Lines {
 		for _, ap := range r.antiPatterns {
 			if ap.MatchString(line) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (r *PatternRule) HasGlobalPrecondition() bool {
+	return len(r.requireGlobal) > 0
+}
+
+func (r *PatternRule) PreconditionMatched(fc FileContext) bool {
+	for _, line := range fc.Lines {
+		for _, gp := range r.requireGlobal {
+			if gp.MatchString(line) {
 				return true
 			}
 		}
@@ -382,11 +446,13 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 			matchLine = stripStringsAndComments(line)
 		}
 
+		matched := false
 		for _, pattern := range r.patterns {
 			if pattern.MatchString(matchLine) {
 				// Honor an inline `// greenlight:ignore <rule-id>` directive on the
 				// matching line or the line directly above it.
 				if suppressedByIgnore(fc.Lines, lineNum, r.id) {
+					matched = true // still counts as "handled" so literalPatterns below doesn't re-fire
 					break
 				}
 				findings = append(findings, Finding{
@@ -399,7 +465,36 @@ func (r *PatternRule) Check(fc FileContext) []Finding {
 					Line:      lineNum + 1,
 					Code:      strings.TrimSpace(line),
 				})
+				matched = true
 				break // One finding per line per rule
+			}
+		}
+
+		// literalPatterns match against each string literal's actual extracted
+		// content, not the raw line — see extractStringLiterals for why that
+		// matters (a naive 'word' regex against the whole line can span across
+		// two separate literals and match text that is in neither of them).
+		if !matched && len(r.literalPatterns) > 0 {
+		literalLoop:
+			for _, lit := range extractStringLiterals(line) {
+				for _, pattern := range r.literalPatterns {
+					if pattern.MatchString(lit) {
+						if suppressedByIgnore(fc.Lines, lineNum, r.id) {
+							break literalLoop
+						}
+						findings = append(findings, Finding{
+							Severity:  r.severity,
+							Guideline: r.guideline,
+							Title:     r.title,
+							Detail:    r.detail,
+							Fix:       r.fix,
+							File:      fc.RelPath,
+							Line:      lineNum + 1,
+							Code:      strings.TrimSpace(line),
+						})
+						break literalLoop // One finding per line per rule
+					}
+				}
 			}
 		}
 	}
@@ -455,6 +550,61 @@ func stripStringsAndComments(line string) string {
 		}
 	}
 	return b.String()
+}
+
+// extractStringLiterals returns the content of each quoted string literal on
+// the line — quote-type aware, like stripStringsAndComments, so a `"` inside
+// a `'...'` literal (or vice versa) is just data, not a new boundary.
+//
+// This exists because a regex shaped like `'[^']*word[^']*'` has no notion of
+// which quote opened which string: given `ios: 'Georgia', android: 'serif'`,
+// it happily starts at the quote that *closes* 'Georgia', scans through the
+// bare, unquoted ` android: ` text (not inside any string), and ends at the
+// quote that *opens* 'serif' — "finding" the word "android" in the gap
+// between two unrelated literals, even though neither literal contains it.
+// Extracting each literal's real content first makes that cross-literal span
+// impossible: "android" only ever matches if some actual literal is
+// "android", "my android app", etc.
+//
+// A backslash-escaped quote (`\"`, `\'`, or an escaped backtick inside a JS
+// template literal) does not end the literal — it's the same escaping every
+// common source language uses for a literal quote character inside a string.
+// Without honoring that, a quote preceded by `\` (e.g. the apostrophe in
+// `'it\'s the android app'`) closed the literal early: everything after the
+// escaped quote fell outside any literal and was silently dropped from the
+// extracted content, so a real competitor mention after it was missed.
+func extractStringLiterals(line string) []string {
+	var literals []string
+	var cur strings.Builder
+	inStr := false
+	var quote byte
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if inStr {
+			if c == '\\' && i+1 < len(line) {
+				// Keep the escaped character as literal content (not a
+				// delimiter) and skip past it so it can't be mistaken for
+				// the closing quote.
+				cur.WriteByte(c)
+				i++
+				cur.WriteByte(line[i])
+				continue
+			}
+			if c == quote {
+				inStr = false
+				literals = append(literals, cur.String())
+				cur.Reset()
+				continue
+			}
+			cur.WriteByte(c)
+			continue
+		}
+		if c == '"' || c == '\'' || c == '`' {
+			inStr = true
+			quote = c
+		}
+	}
+	return literals
 }
 
 // suppressedByIgnore reports whether the matching line, or the line directly

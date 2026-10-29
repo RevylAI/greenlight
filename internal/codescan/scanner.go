@@ -68,7 +68,30 @@ func (s *Scanner) Scan() ([]Finding, error) {
 		}
 	}
 
-	// Second pass: run all rules, skipping globally-suppressed ones.
+	// Same pre-pass, inverted: determine which global-precondition rules have
+	// their required marker present anywhere in the project. A rule gated this
+	// way stays off entirely (not just suppressed-if-found) until its marker
+	// shows up — e.g. a child-directed-app rule has no business running at all
+	// against a project that never declares itself child-directed.
+	preconditionMet := make(map[string]bool)
+	for _, rule := range s.rules {
+		gpr, ok := rule.(GlobalPreconditionRule)
+		if !ok || !gpr.HasGlobalPrecondition() {
+			continue
+		}
+		for _, f := range files {
+			if !rule.Applies(f) {
+				continue
+			}
+			if gpr.PreconditionMatched(f) {
+				preconditionMet[gpr.RuleID()] = true
+				break
+			}
+		}
+	}
+
+	// Second pass: run all rules, skipping globally-suppressed ones and ones
+	// whose required precondition was never found.
 	var (
 		mu       sync.Mutex
 		findings []Finding
@@ -90,6 +113,12 @@ func (s *Scanner) Scan() ([]Finding, error) {
 				// Skip rules whose global anti-patterns are satisfied.
 				if gar, ok := rule.(GlobalAntiPatternRule); ok && gar.HasGlobalAntiPatterns() {
 					if suppressed[gar.RuleID()] {
+						continue
+					}
+				}
+				// Skip rules whose required global precondition was never found.
+				if gpr, ok := rule.(GlobalPreconditionRule); ok && gpr.HasGlobalPrecondition() {
+					if !preconditionMet[gpr.RuleID()] {
 						continue
 					}
 				}

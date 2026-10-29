@@ -164,7 +164,10 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 		}
 	}
 	fmt.Println()
-	fmt.Println("  Run 'greenlight scan --app-id YOUR_APP_ID' to start scanning.")
+	fmt.Println("  Run 'greenlight preflight .' to scan your project now.")
+	fmt.Println("  'greenlight scan --app-id YOUR_APP_ID' needs an App Store Connect API")
+	fmt.Println("  key — this Apple ID session can't call that API. Run 'greenlight auth")
+	fmt.Println("  setup' if you want the --app-id tier too.")
 	fmt.Println()
 
 	return nil

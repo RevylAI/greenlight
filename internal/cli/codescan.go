@@ -41,6 +41,7 @@ Checks for:
   • Missing Restore Purchases for IAP
   • Missing ATT for ad/tracking SDKs
   • Account creation without deletion option
+  • Child-directed app with no parental gate before external links/purchases
   • Placeholder content in strings
   • Platform references (Android, Google Play)
   • Hardcoded IPv4 addresses

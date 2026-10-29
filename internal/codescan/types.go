@@ -66,6 +66,24 @@ type GlobalAntiPatternRule interface {
 	RuleID() string
 }
 
+// GlobalPreconditionRule is the AND-gate counterpart to GlobalAntiPatternRule:
+// implemented by rules that only run at all when a separate marker pattern is
+// found somewhere in the project (not just the current file). Where
+// GlobalAntiPatternRule suppresses a rule when evidence of a fix is found
+// anywhere, GlobalPreconditionRule gates a rule so it never fires unless
+// evidence that it even applies is found anywhere first — e.g. a rule about
+// "apps that declare themselves child-directed" shouldn't run its per-line
+// patterns against every project, only ones that actually set that flag.
+type GlobalPreconditionRule interface {
+	Rule
+	// HasGlobalPrecondition returns true if this rule requires a project-wide marker.
+	HasGlobalPrecondition() bool
+	// PreconditionMatched returns true if the marker pattern matches the given file.
+	PreconditionMatched(fc FileContext) bool
+	// RuleID returns the rule identifier.
+	RuleID() string
+}
+
 // Summary holds aggregate results.
 type Summary struct {
 	Total     int  `json:"total"`
