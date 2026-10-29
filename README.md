@@ -185,6 +185,7 @@ On scope: a source scan reads the `AndroidManifest.xml` and Gradle files in your
 
 ```bash
 greenlight privacy /path/to/project
+greenlight privacy /path/to/project --format json
 ```
 
 Checks that PrivacyInfo.xcprivacy exists and is filled in, finds Required Reason APIs used in code and compares them against what the manifest declares, and cross-references detected tracking SDKs against your ATT implementation.
