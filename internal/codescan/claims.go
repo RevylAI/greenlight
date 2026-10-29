@@ -23,6 +23,22 @@ type Claims struct {
 	HasDeleteAccountCode bool `json:"has_delete_account_code"`
 	HasRestoreCode       bool `json:"has_restore_code"`
 	HasSignInWithApple   bool `json:"has_sign_in_with_apple"`
+
+	// Permission-gated API presence (camera/microphone/photo library/location)
+	// and whether the matching Info.plist usage-description key is present —
+	// mirrors the four permission-usage rules in rules_permissions.go. A
+	// permission category is claimed independently of the others, and each
+	// has its own key, so e.g. declaring NSCameraUsageDescription does not
+	// satisfy a claimed microphone usage.
+	CameraAPI       bool `json:"camera_api"`
+	MicrophoneAPI   bool `json:"microphone_api"`
+	PhotoLibraryAPI bool `json:"photo_library_api"`
+	LocationAPI     bool `json:"location_api"`
+
+	HasCameraUsageDescription       bool `json:"has_camera_usage_description"`
+	HasMicrophoneUsageDescription   bool `json:"has_microphone_usage_description"`
+	HasPhotoLibraryUsageDescription bool `json:"has_photo_library_usage_description"`
+	HasLocationUsageDescription     bool `json:"has_location_usage_description"`
 }
 
 // These mirror the patterns/antiPatterns in rules.go for the three flow-dependent
@@ -36,6 +52,17 @@ var (
 	reDeleteAccount = regexp.MustCompile(`(?i)(deleteAccount|delete.*account|remove.*account|account.*delet|close.*account|closeAccount|cancel.*account|delete.*my.*account|erase.*account)`)
 	reRestore       = regexp.MustCompile(`(?i)(restoreCompletedTransactions|restore.*purchase|restorePurchase|customerInfo|syncPurchases)`)
 	reSiwA          = regexp.MustCompile(`(?i)(ASAuthorizationAppleIDProvider|SignInWithApple|apple.*auth|appleAuth|expo-apple-authentication)`)
+
+	// Mirror the four permission-usage rules in rules_permissions.go.
+	reCameraAPI       = regexp.MustCompile(`\bAVCaptureSession\s*\(|\bAVCaptureDevice\.(default|requestAccess|authorizationStatus)\b|(?i)(expo-camera|expo-barcode-scanner|react-native-vision-camera|react-native-camera)\b`)
+	reMicrophoneAPI   = regexp.MustCompile(`\bAVAudioApplication\.requestRecordPermission\b|\.requestRecordPermission\s*\(|AVCaptureDevice\.requestAccess\(\s*for:\s*\.audio\s*\)|(?i)(expo-av\b|react-native-audio-recorder-player|@react-native-voice/voice|react-native-voice)\b`)
+	rePhotoLibraryAPI = regexp.MustCompile(`\bPHPhotoLibrary\.(requestAuthorization|shared)\b|\bUIImagePickerController\s*\(|(?i)(expo-media-library|react-native-image-picker|react-native-cameraroll|@react-native-camera-roll/camera-roll)\b`)
+	reLocationAPI     = regexp.MustCompile(`\.request(WhenInUseAuthorization|AlwaysAuthorization)\s*\(\s*\)|(?i)(expo-location\b|react-native-geolocation-service|@react-native-community/geolocation)\b`)
+
+	reCameraUsageDescription       = regexp.MustCompile(`NSCameraUsageDescription`)
+	reMicrophoneUsageDescription   = regexp.MustCompile(`NSMicrophoneUsageDescription`)
+	rePhotoLibraryUsageDescription = regexp.MustCompile(`NSPhotoLibraryUsageDescription`)
+	reLocationUsageDescription     = regexp.MustCompile(`NSLocation(WhenInUseUsageDescription|AlwaysAndWhenInUseUsageDescription|AlwaysUsageDescription)`)
 )
 
 // DetectClaims walks the project — reusing the scanner's file collection and
@@ -49,10 +76,30 @@ func DetectClaims(root string) (Claims, error) {
 
 	var c Claims
 	for _, fc := range files {
+		// The permission usage-description keys live in Info.plist, not
+		// source — checked first, independently of the source-only switch
+		// below, so a plist file isn't skipped before it gets a chance.
+		if fc.Language == "plist" {
+			content := strings.Join(fc.Lines, "\n")
+			if reCameraUsageDescription.MatchString(content) {
+				c.HasCameraUsageDescription = true
+			}
+			if reMicrophoneUsageDescription.MatchString(content) {
+				c.HasMicrophoneUsageDescription = true
+			}
+			if rePhotoLibraryUsageDescription.MatchString(content) {
+				c.HasPhotoLibraryUsageDescription = true
+			}
+			if reLocationUsageDescription.MatchString(content) {
+				c.HasLocationUsageDescription = true
+			}
+			continue
+		}
+
 		switch fc.Language {
 		case "swift", "objc", "typescript", "javascript":
 		default:
-			continue // ignore plist/json config — claims live in source
+			continue // ignore other json config — claims live in source
 		}
 		content := strings.Join(fc.Lines, "\n")
 		if reAccountCreation.MatchString(content) {
@@ -72,6 +119,18 @@ func DetectClaims(root string) (Claims, error) {
 		}
 		if reSiwA.MatchString(content) {
 			c.HasSignInWithApple = true
+		}
+		if reCameraAPI.MatchString(content) {
+			c.CameraAPI = true
+		}
+		if reMicrophoneAPI.MatchString(content) {
+			c.MicrophoneAPI = true
+		}
+		if rePhotoLibraryAPI.MatchString(content) {
+			c.PhotoLibraryAPI = true
+		}
+		if reLocationAPI.MatchString(content) {
+			c.LocationAPI = true
 		}
 	}
 	return c, nil

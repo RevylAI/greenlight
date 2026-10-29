@@ -65,6 +65,35 @@ func AllFlows() []Flow {
 			},
 		},
 		{
+			ID:          "permission-usage-description",
+			Guideline:   "5.1.1",
+			Title:       "A permission prompt must appear, not a crash",
+			StaticRule:  "camera-no-usage-description, microphone-no-usage-description, photo-library-no-usage-description, location-no-usage-description",
+			AntiPattern: "an NSCameraUsageDescription / NSMicrophoneUsageDescription / NSPhotoLibraryUsageDescription / NSLocation*UsageDescription key",
+			claimed: func(c codescan.Claims) bool {
+				return c.CameraAPI || c.MicrophoneAPI || c.PhotoLibraryAPI || c.LocationAPI
+			},
+			// Static analysis only confirms the key string exists somewhere in
+			// the project, in whichever Info.plist that happens to be — not that
+			// it's actually wired to the target that ships, or that the OS
+			// prompt it backs ever appears instead of crashing. "Passed" means
+			// every permission category the app claims has its matching key
+			// present; this flow re-checks each claimed category on a real
+			// device.
+			staticPassed: func(c codescan.Claims) bool {
+				return (!c.CameraAPI || c.HasCameraUsageDescription) &&
+					(!c.MicrophoneAPI || c.HasMicrophoneUsageDescription) &&
+					(!c.PhotoLibraryAPI || c.HasPhotoLibraryUsageDescription) &&
+					(!c.LocationAPI || c.HasLocationUsageDescription)
+			},
+			Steps: []Step{
+				{Type: "instructions", Desc: "Exercise every feature that uses the camera, microphone, photo library, or location (whichever the app has)"},
+				{Type: "validation", Desc: "Each one shows the native iOS permission dialog with readable, specific text — the app does not crash or silently fail the moment access is requested"},
+				{Type: "instructions", Desc: "Tap Allow on each permission dialog"},
+				{Type: "validation", Desc: "The feature behind each granted permission actually works afterward (camera preview renders, recording starts, photo picker opens, or location updates appear)"},
+			},
+		},
+		{
 			ID:           "sign-in-apple",
 			Guideline:    "4.8",
 			Title:        "Sign in with Apple must actually start Apple sign-in",

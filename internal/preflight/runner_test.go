@@ -102,6 +102,30 @@ func TestRunLeavesIOSProjectsUnchanged(t *testing.T) {
 	}
 }
 
+// The same rule firing in two different files is two distinct, real findings
+// (a second hardcoded secret is not fixed by fixing the first one), not a
+// cross-scanner duplicate. Title-only dedup must not collapse them.
+func TestRunKeepsSameRuleFindingsFromDifferentFiles(t *testing.T) {
+	root := t.TempDir()
+	mustWrite(t, root, "Sources/ConfigA.swift", `let key = "AKIAABCDEFGHIJKLMNOP"`+"\n")
+	mustWrite(t, root, "Sources/ConfigB.swift", `let stripeKey = "sk_live_1234567890abcdefghij"`+"\n")
+
+	result, err := Run(root, "", "", false)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var secretFiles []string
+	for _, f := range result.Findings {
+		if f.Title == "Hardcoded secret/API key detected" {
+			secretFiles = append(secretFiles, f.File)
+		}
+	}
+	if len(secretFiles) != 2 {
+		t.Fatalf("expected 2 distinct hardcoded-secret findings (one per file), got %d: %v", len(secretFiles), secretFiles)
+	}
+}
+
 func mustWrite(t *testing.T, root, rel, content string) {
 	t.Helper()
 	full := filepath.Join(root, rel)

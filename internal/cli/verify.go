@@ -43,7 +43,8 @@ is suppressed — but it dead-ends at runtime, and Apple rejects it. verify runs
 flow on a device and catches it.
 
 Flows verified: account-deletion (§5.1.1), restore-purchases (§3.1.1),
-sign-in-apple (§4.8). Only flows your app actually claims are run.
+sign-in-apple (§4.8), permission-usage-description (§5.1.1). Only flows your
+app actually claims are run.
 
 Unlike every other greenlight command this is NOT offline: it needs the revyl CLI,
 a Revyl account (revyl auth login), and a registered build. Run preflight first;
@@ -59,7 +60,7 @@ Usage:
 
 func init() {
 	verifyCmd.Flags().StringVar(&verifyBuildName, "build-name", "", "Revyl registered build/app name (required to run; maps to YAML build.name)")
-	verifyCmd.Flags().StringSliceVar(&verifyFlows, "flows", nil, "limit to specific flows: account-deletion, restore-purchases, sign-in-apple")
+	verifyCmd.Flags().StringSliceVar(&verifyFlows, "flows", nil, "limit to specific flows: account-deletion, restore-purchases, sign-in-apple, permission-usage-description")
 	verifyCmd.Flags().StringArrayVar(&verifyVarsRaw, "var", nil, "test variable, e.g. --var email=qa@acme.com (repeatable)")
 	verifyCmd.Flags().StringVar(&verifyDeviceModel, "device-model", "", "target device model, e.g. \"iPhone 16\"")
 	verifyCmd.Flags().StringVar(&verifyOSVersion, "os-version", "", "target OS version, e.g. \"iOS 26.2\"")
@@ -231,6 +232,9 @@ func writeVerifyTerminal(w *os.File, r *verify.Result) {
 	}
 	if r.Claims.SocialLogin {
 		claimed = append(claimed, "social login")
+	}
+	if r.Claims.CameraAPI || r.Claims.MicrophoneAPI || r.Claims.PhotoLibraryAPI || r.Claims.LocationAPI {
+		claimed = append(claimed, "permission-gated API (camera/microphone/photo library/location)")
 	}
 	if len(claimed) > 0 {
 		fmt.Fprintf(w, "  Flow-dependent features detected: %s\n\n", strings.Join(claimed, ", "))
