@@ -127,6 +127,7 @@ func Scan(root string) (*ScanResult, error) {
 		gradle:       gradle,
 		targetSDK:    result.TargetSDK,
 		manifestFile: result.ManifestPath,
+		subscription: scanSubscriptionSource(root),
 	}
 	for _, rule := range allRules() {
 		result.Findings = append(result.Findings, rule(ctx)...)

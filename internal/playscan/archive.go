@@ -129,17 +129,18 @@ func ScanArchive(archivePath string) (*ScanResult, error) {
 
 // gradleOnlyCoverageFinding names the checks an artifact scan cannot perform.
 // Play Billing version, ads-SDK detection, and auth-SDK detection all read the
-// Gradle model, which a built archive does not carry. Reporting the gap keeps a
-// clean artifact scan from reading as a clean scan of everything.
+// Gradle model; subscription-renewal-disclosure reads Kotlin/Java/XML source.
+// A built archive carries neither. Reporting the gap keeps a clean artifact
+// scan from reading as a clean scan of everything.
 func gradleOnlyCoverageFinding(archivePath string) Finding {
 	return Finding{
 		Severity: sevInfo,
 		Policy:   "Scan coverage",
 		Title:    "Dependency-based checks were skipped for this artifact",
-		Detail: "A built archive carries no Gradle state, so these source-only checks did not run: " +
-			"Play Billing Library version, ads-SDK detection (the AD_ID permission check), and auth-SDK detection " +
-			"(the account-deletion requirement). Manifest, permission, and native code checks all ran normally.",
-		Fix:  "Run `greenlight playscan .` against the project source as well. The two scans are complementary: source sees dependencies, the artifact sees the merged manifest.",
+		Detail: "A built archive carries no Gradle state and no readable app source, so these source-only checks did not run: " +
+			"Play Billing Library version, ads-SDK detection (the AD_ID permission check), auth-SDK detection " +
+			"(the account-deletion requirement), and the subscription renewal-disclosure check. Manifest, permission, and native code checks all ran normally.",
+		Fix:  "Run `greenlight playscan .` against the project source as well. The two scans are complementary: source sees dependencies and code, the artifact sees the merged manifest.",
 		File: archivePath,
 	}
 }

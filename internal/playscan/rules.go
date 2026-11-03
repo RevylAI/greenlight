@@ -15,6 +15,7 @@ const (
 	docRestrictedPerms = "https://support.google.com/googleplay/android-developer/answer/14115180"
 	docForegroundSvc   = "https://support.google.com/googleplay/android-developer/answer/13392821"
 	docAccountDeletion = "https://support.google.com/googleplay/android-developer/answer/13327111"
+	docSubscriptions   = "https://support.google.com/googleplay/android-developer/answer/9900533"
 	docAdvertisingID   = "https://support.google.com/googleplay/android-developer/answer/6048248"
 	docAppContent      = "https://support.google.com/googleplay/android-developer/answer/9859455"
 	docProgramPolicy   = "https://support.google.com/googleplay/android-developer/answer/16810878"
@@ -54,6 +55,12 @@ type ruleContext struct {
 	gradle       *GradleInfo
 	targetSDK    int
 	manifestFile string
+
+	// subscription is populated from a source-level scan (Kotlin/Java/XML),
+	// unlike everything else on this struct which comes from the manifest or
+	// Gradle. It is computed once in Scan() rather than per-rule because only
+	// one rule needs it today, but a second rule would read the same walk.
+	subscription subscriptionSignals
 }
 
 func (c *ruleContext) hasPermission(name string) bool {
@@ -82,6 +89,7 @@ func allRules() []rule {
 		ruleCleartextTraffic,
 		ruleAdvertisingID,
 		ruleAccountDeletion,
+		ruleSubscriptionRenewalDisclosure,
 	}
 }
 
@@ -622,6 +630,38 @@ func ruleAccountDeletion(c *ruleContext) []Finding {
 			"and associated user data must actually be deleted.",
 		Fix: "Ship an in-app deletion flow, publish a deletion web page, and enter its URL in the Data safety section of Play Console.",
 		Doc: docAccountDeletion,
+	}}
+}
+
+// ruleSubscriptionRenewalDisclosure is the Play equivalent of Apple's §3.1.2:
+// Google's Subscriptions policy requires apps to be "transparent about your
+// offer," explicitly disclosing the cost, billing frequency, and automatic
+// renewal terms, with the user never having to take an extra action to see
+// them, plus a clear way to manage or cancel. The single most common way an
+// app fails this is shipping a subscription purchase flow with no renewal
+// disclosure text anywhere near it.
+//
+// Narrower than "ships Play Billing": the billingclient dependency alone
+// covers one-time purchases too, so this fires only on subscription-specific
+// call sites (ProductType.SUBS, SubscriptionOfferDetails, RevenueCat's
+// purchasePackage, etc.), and is suppressed when the required disclosure
+// wording is found anywhere in the project — the same static-can-only-
+// confirm-string-presence shape codescan's flow-dependent rules already use.
+func ruleSubscriptionRenewalDisclosure(c *ruleContext) []Finding {
+	if !c.subscription.HasSubscriptionAPI || c.subscription.HasDisclosure {
+		return nil
+	}
+	return []Finding{{
+		Severity: sevHigh,
+		Policy:   "Subscriptions",
+		Title:    "Auto-renewable subscription without renewal disclosure",
+		Detail: "A subscription-specific billing call site is present, but no renewal disclosure wording (\"automatically renews unless cancelled\", price, billing frequency) " +
+			"was found anywhere in the project. Google Play's Subscriptions policy requires this to be visible without the user taking any extra action to find it, " +
+			"along with an easy, in-app or linked way to manage or cancel.",
+		Fix:  "Show the subscription's price, billing frequency, and auto-renewal terms on the purchase screen without an extra tap, and link an easy way to manage or cancel.",
+		Doc:  docSubscriptions,
+		File: c.subscription.File,
+		Line: c.subscription.Line,
 	}}
 }
 

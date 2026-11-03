@@ -71,7 +71,7 @@ greenlight preflight . --exit-code              # non-zero on CRITICAL/HIGH
 | metadata | app.json / Info.plist: name, version, bundle ID format, icon, privacy policy URL, purpose strings |
 | codescan | 24 rules over Swift, Objective-C, React Native, and Expo source |
 | privacy | PrivacyInfo.xcprivacy completeness, Required Reason APIs, tracking SDKs vs ATT |
-| playscan | Google Play policy, target API deadline, restricted permissions, foreground service types, Play Billing version (Android projects only) |
+| playscan | Google Play policy, target API deadline, restricted permissions, foreground service types, Play Billing version, subscription renewal disclosure (Android projects only) |
 | ipa | Binary: Info.plist keys, launch storyboard, icons, app size, framework privacy manifests |
 
 Adding `--verify` extends the same command into the runtime tier, so one invocation covers static and runtime:
@@ -161,10 +161,11 @@ Manifest and build:
 - `android:usesCleartextTraffic="true"`
 - An ads SDK shipped without `com.google.android.gms.permission.AD_ID`, which silently returns a zeroed advertising ID
 - Account creation without the required in-app *and* web deletion paths
+- An auto-renewable subscription (Play Billing `ProductType.SUBS`, RevenueCat) with no renewal disclosure text anywhere in the project — Google Play's Subscriptions policy equivalent of Apple's §3.1.2. HIGH
 
 `--apk` and `--aab` read the *merged* manifest, so they see permissions contributed by library manifests that a source scan structurally cannot. Every manifest and permission check above runs against a built artifact, plus the native code checks below.
 
-The three checks that read the Gradle model (Play Billing version, ads-SDK detection, auth-SDK detection) cannot run on an archive, because a built artifact does not carry one. The scan reports that gap as a finding rather than staying silent, so a clean artifact scan is never mistaken for a clean scan of everything. Source and artifact are complementary; `preflight` accepts both at once:
+The three checks that read the Gradle model (Play Billing version, ads-SDK detection, auth-SDK detection) and the one that reads Kotlin/Java/XML source (subscription renewal disclosure) cannot run on an archive, because a built artifact carries neither. The scan reports that gap as a finding rather than staying silent, so a clean artifact scan is never mistaken for a clean scan of everything. Source and artifact are complementary; `preflight` accepts both at once:
 
 ```bash
 greenlight preflight . --aab app-release.aab
@@ -185,6 +186,7 @@ On scope: a source scan reads the `AndroidManifest.xml` and Gradle files in your
 
 ```bash
 greenlight privacy /path/to/project
+greenlight privacy /path/to/project --format json
 ```
 
 Checks that PrivacyInfo.xcprivacy exists and is filled in, finds Required Reason APIs used in code and compares them against what the manifest declares, and cross-references detected tracking SDKs against your ATT implementation.
